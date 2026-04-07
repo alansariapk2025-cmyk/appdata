@@ -1,5 +1,7 @@
-// 📄 File: SendNotificationScreen.jsx
-// ✅ Admin panel - sends to push_tokens collection (includes guest + users)
+// ================================================================
+// 📁 src/screens/SendNotificationScreen.jsx
+// ✅ FCM ONLY - No Expo
+// ================================================================
 
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
@@ -12,13 +14,42 @@ import {
   onSnapshot,
   deleteDoc,
   doc,
-  where,
 } from "firebase/firestore";
 
-import { FaHistory, FaTrash, FaUsers, FaBell, FaUserCheck } from "react-icons/fa";
+import {
+  FaHistory,
+  FaTrash,
+  FaBell,
+  FaUserCheck,
+  FaServer,
+  FaAndroid,
+  FaUsers,
+  FaSync,
+  FaCheckCircle,
+  FaExclamationTriangle,
+} from "react-icons/fa";
 
-const BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+// ================================================================
+// ✅ Backend URL
+// ================================================================
+const getBackendURL = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  
+  const hostname = window.location.hostname;
+  if (hostname !== 'localhost' && hostname !== '127.0.0.1') {
+    return 'https://my-broadcast-app.onrender.com';
+  }
+  
+  return 'http://localhost:5000';
+};
 
+const BACKEND_URL = getBackendURL();
+
+// ================================================================
+// ✅ Templates
+// ================================================================
 const NOTIFICATION_TEMPLATES = [
   {
     id: "eid_offer",
@@ -32,6 +63,24 @@ const NOTIFICATION_TEMPLATES = [
     body: "Flat 30% off on selected products. Limited time only!",
     action: "home",
   },
+  {
+    id: "new_arrival",
+    title: "🆕 New Products Arrived!",
+    body: "Check out our latest collection. Shop now!",
+    action: "home",
+  },
+  {
+    id: "order_reminder",
+    title: "🛒 Complete Your Order!",
+    body: "You have items in your cart. Don't miss out!",
+    action: "cart",
+  },
+  {
+    id: "flash_sale",
+    title: "⚡ Flash Sale Alert!",
+    body: "24-hour flash sale - Up to 50% off! Hurry!",
+    action: "home",
+  },
 ];
 
 const ACTION_ROUTES = {
@@ -41,6 +90,9 @@ const ACTION_ROUTES = {
   orders: "/account/OrderHistoryScreen",
 };
 
+// ================================================================
+// ✅ Main Component
+// ================================================================
 export default function SendNotificationScreen() {
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -48,6 +100,8 @@ export default function SendNotificationScreen() {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [notificationHistory, setNotificationHistory] = useState([]);
+  const [serverStatus, setServerStatus] = useState("checking");
+  const [lastPing, setLastPing] = useState(null);
   const [stats, setStats] = useState({
     totalPushTokens: 0,
     enabledPushTokens: 0,
@@ -56,46 +110,88 @@ export default function SendNotificationScreen() {
     totalUsers: 0,
   });
 
-  // ✅ Load stats from push_tokens collection
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // Fetch from push_tokens collection
-        const pushTokensSnapshot = await getDocs(collection(db, "push_tokens"));
-        const usersSnapshot = await getDocs(collection(db, "users"));
+  // ================================================================
+  // ✅ Check Server Health
+  // ================================================================
+  const checkServerHealth = async () => {
+    setServerStatus("checking");
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
 
-        let enabledPushTokens = 0;
-        let guestTokens = 0;
-        let userTokens = 0;
+      const response = await fetch(`${BACKEND_URL}/ping`, {
+        method: "GET",
+        signal: controller.signal,
+      });
 
-        pushTokensSnapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data?.expoPushToken && data?.pushEnabled === true) {
-            enabledPushTokens++;
-            if (data?.isGuest === true) {
-              guestTokens++;
-            } else {
-              userTokens++;
-            }
-          }
-        });
+      clearTimeout(timeoutId);
 
-        setStats({
-          totalPushTokens: pushTokensSnapshot.size,
-          enabledPushTokens,
-          guestTokens,
-          userTokens,
-          totalUsers: usersSnapshot.size,
-        });
-      } catch (err) {
-        console.warn("Failed to load stats:", err);
+      if (response.ok) {
+        setServerStatus("online");
+        setLastPing(new Date().toLocaleTimeString());
+      } else {
+        setServerStatus("offline");
       }
-    };
+    } catch (error) {
+      setServerStatus("offline");
+    }
+  };
 
+  useEffect(() => {
+    checkServerHealth();
+    const interval = setInterval(checkServerHealth, 60000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ================================================================
+  // ✅ Load Stats (FCM Only)
+  // ================================================================
+  const fetchStats = async () => {
+    try {
+      const [pushTokensSnapshot, usersSnapshot] = await Promise.all([
+        getDocs(collection(db, "push_tokens")),
+        getDocs(collection(db, "users"))
+      ]);
+
+      let enabledPushTokens = 0;
+      let guestTokens = 0;
+      let userTokens = 0;
+
+      pushTokensSnapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        
+        if (data?.pushEnabled === true && data?.fcmToken && data.fcmToken.trim() !== "") {
+          enabledPushTokens++;
+          
+          if (data?.isGuest === true) {
+            guestTokens++;
+          } else {
+            userTokens++;
+          }
+        }
+      });
+
+      setStats({
+        totalPushTokens: pushTokensSnapshot.size,
+        enabledPushTokens,
+        guestTokens,
+        userTokens,
+        totalUsers: usersSnapshot.size,
+      });
+      
+      console.log("📊 FCM Stats:", { enabled: enabledPushTokens });
+    } catch (err) {
+      console.error("❌ Stats error:", err);
+    }
+  };
+
+  useEffect(() => {
     fetchStats();
   }, []);
 
-  // ✅ Notification history live listener
+  // ================================================================
+  // ✅ History Listener
+  // ================================================================
   useEffect(() => {
     const q = query(
       collection(db, "notification_history"),
@@ -103,262 +199,329 @@ export default function SendNotificationScreen() {
       limit(20)
     );
 
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        setNotificationHistory(
-          snap.docs.map((d) => ({
-            id: d.id,
-            ...d.data(),
-          }))
-        );
-      },
-      (err) => console.warn("Notification history listener error:", err)
-    );
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setNotificationHistory(
+        snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+      );
+    });
 
-    return () => unsub();
+    return () => unsubscribe();
   }, []);
 
-  // ✅ Send Broadcast Function
+  // ================================================================
+  // ✅ Send Broadcast
+  // ================================================================
   const sendNotificationToAll = async () => {
     if (!title.trim() || !body.trim()) {
-      alert("Enter title & body");
+      alert("⚠️ Please enter title and body");
       return;
     }
 
+    if (serverStatus !== "online") {
+      const proceed = window.confirm("⚠️ Server offline. Try anyway?");
+      if (!proceed) return;
+    }
+
     setLoading(true);
-    setStatus("🚀 Sending notification...");
+    setStatus("🚀 Sending via FCM...");
 
     try {
       const link = ACTION_ROUTES[selectedAction] || "/home";
 
       const response = await fetch(`${BACKEND_URL}/send-broadcast`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: title.trim(),
-          body: body.trim(),
-          link,
-        }),
+        headers: { 
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        },
+        body: JSON.stringify({ title: title.trim(), body: body.trim(), link }),
       });
 
       const result = await response.json();
+      
       if (!response.ok) {
-        throw new Error(result.error || "Push server failed");
+        throw new Error(result.error || `Error: ${response.status}`);
       }
 
-      const totalSent = result.totalTokens ?? 0;
+      const totalDevices = result.totalDevices ?? 0;
+      const totalSent = result.totalSent ?? 0;
       const invalidRemoved = result.invalidTokensRemoved ?? 0;
 
-      setStatus(
-        `✅ Sent to ${totalSent} users` +
-          (invalidRemoved > 0 ? ` (${invalidRemoved} invalid removed)` : "")
-      );
+      let statusMessage = `✅ Sent to ${totalSent}/${totalDevices} devices`;
+      
+      if (invalidRemoved > 0) {
+        statusMessage += ` • 🗑️ ${invalidRemoved} invalid removed`;
+      }
+
+      setStatus(statusMessage);
       setTitle("");
       setBody("");
+      setSelectedAction("home");
 
-      // Refresh stats
-      const pushTokensSnapshot = await getDocs(collection(db, "push_tokens"));
-      let enabledPushTokens = 0;
-      let guestTokens = 0;
-      let userTokens = 0;
-
-      pushTokensSnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        if (data?.expoPushToken && data?.pushEnabled === true) {
-          enabledPushTokens++;
-          if (data?.isGuest === true) guestTokens++;
-          else userTokens++;
-        }
-      });
-
-      setStats((prev) => ({
-        ...prev,
-        totalPushTokens: pushTokensSnapshot.size,
-        enabledPushTokens,
-        guestTokens,
-        userTokens,
-      }));
-
-      setTimeout(() => setStatus(""), 5000);
+      await fetchStats();
+      setTimeout(() => setStatus(""), 10000);
+      
     } catch (error) {
-      console.error("Broadcast error:", error);
-      setStatus(`❌ ${error.message}`);
+      setStatus(`❌ Error: ${error.message}`);
     } finally {
       setLoading(false);
     }
   };
 
+  // ================================================================
   // ✅ Use Template
+  // ================================================================
   const useTemplate = (template) => {
     setTitle(template.title);
     setBody(template.body);
     setSelectedAction(template.action);
   };
 
+  // ================================================================
   // ✅ Delete History
+  // ================================================================
   const deleteFromHistory = async (id) => {
-    if (!window.confirm("Delete this notification?")) return;
-    await deleteDoc(doc(db, "notification_history", id));
+    if (!window.confirm("Delete?")) return;
+    try {
+      await deleteDoc(doc(db, "notification_history", id));
+    } catch (error) {
+      alert("Failed: " + error.message);
+    }
   };
 
+  // ================================================================
+  // ✅ Server Status Badge
+  // ================================================================
+  const ServerStatusBadge = () => {
+    const config = {
+      online: { color: "bg-green-500", text: "text-green-300", label: "🟢 Online", icon: <FaCheckCircle /> },
+      offline: { color: "bg-red-500", text: "text-red-300", label: "🔴 Offline", icon: <FaExclamationTriangle /> },
+      checking: { color: "bg-yellow-500", text: "text-yellow-300", label: "🟡 Checking...", icon: <FaSync className="animate-spin" /> },
+    }[serverStatus];
+
+    return (
+      <div className="flex items-center gap-2">
+        <span className={`w-2 h-2 rounded-full ${config.color} animate-pulse`}></span>
+        <span className={`text-sm font-medium ${config.text} flex items-center gap-1`}>
+          {config.icon} {config.label}
+        </span>
+        {lastPing && serverStatus === "online" && (
+          <span className="text-xs text-gray-500">({lastPing})</span>
+        )}
+        <button onClick={checkServerHealth} className="text-xs text-blue-400 hover:text-blue-300 ml-1 p-1 hover:bg-white/10 rounded">
+          <FaSync className={serverStatus === "checking" ? "animate-spin" : ""} />
+        </button>
+      </div>
+    );
+  };
+
+  // ================================================================
+  // ✅ Render
+  // ================================================================
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 text-white">
       <div className="max-w-6xl mx-auto p-6 space-y-6">
-        {/* Header */}
-        <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold">📢 Broadcast Notifications</h1>
-            <p className="text-sm text-gray-400">
-              Send notifications to all users (logged-in + guests) who enabled push.
-            </p>
+
+        <header className="flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold">📢 FCM Broadcast</h1>
+              <p className="text-sm text-gray-400 mt-1">
+                Firebase Cloud Messaging Only
+              </p>
+            </div>
+
+            <div className="rounded-xl border border-white/20 bg-white/10 px-4 py-3 backdrop-blur-lg shadow-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <FaServer className="text-gray-400" />
+                <ServerStatusBadge />
+              </div>
+              <p className="text-xs text-gray-500 truncate max-w-xs">{BACKEND_URL}</p>
+            </div>
           </div>
 
-          {/* Stats Cards */}
-          <div className="flex flex-wrap gap-3">
+          {/* Stats */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 shadow-lg backdrop-blur-lg">
               <p className="text-xs text-white/70 flex items-center gap-1">
-                <FaBell /> Total Tokens
+                <FaBell className="text-blue-400" /> Total
               </p>
-              <p className="text-xl font-semibold">{stats.totalPushTokens}</p>
+              <p className="text-2xl font-bold mt-1">{stats.totalPushTokens}</p>
             </div>
+
             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 shadow-lg backdrop-blur-lg">
               <p className="text-xs text-white/70 flex items-center gap-1">
-                <FaUserCheck /> Push Enabled
+                <FaAndroid className="text-green-400" /> FCM Enabled
               </p>
-              <p className="text-xl font-semibold text-emerald-300">
-                {stats.enabledPushTokens}
+              <p className="text-2xl font-bold text-green-300 mt-1">{stats.enabledPushTokens}</p>
+            </div>
+
+            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 shadow-lg backdrop-blur-lg">
+              <p className="text-xs text-white/70 flex items-center gap-1">
+                <FaUsers className="text-blue-400" /> Users
               </p>
+              <p className="text-2xl font-bold text-blue-300 mt-1">{stats.userTokens}</p>
             </div>
+
             <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 shadow-lg backdrop-blur-lg">
-              <p className="text-xs text-white/70">Logged-in Users</p>
-              <p className="text-xl font-semibold text-blue-300">{stats.userTokens}</p>
-            </div>
-            <div className="rounded-2xl border border-white/20 bg-white/10 px-4 py-3 shadow-lg backdrop-blur-lg">
-              <p className="text-xs text-white/70">Guest Users</p>
-              <p className="text-xl font-semibold text-amber-300">{stats.guestTokens}</p>
+              <p className="text-xs text-white/70">👤 Guests</p>
+              <p className="text-2xl font-bold text-amber-300 mt-1">{stats.guestTokens}</p>
             </div>
           </div>
         </header>
 
         <section className="grid gap-6 lg:grid-cols-2">
-          {/* Compose Section */}
+          
+          {/* Compose */}
           <div className="rounded-2xl border border-white/20 bg-white/10 p-6 shadow-lg backdrop-blur-xl">
-            <h2 className="text-xl font-semibold mb-4">✍️ Compose message</h2>
+            <h2 className="text-xl font-semibold mb-4">✍️ Compose Message</h2>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Title
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Title *</label>
                 <input
+                  type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="Example: Eid Offer - 40% off"
-                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="e.g., Eid Offer - 40% off"
+                  maxLength={100}
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-400"
                 />
+                <p className="text-xs text-gray-500 mt-1 text-right">{title.length}/100</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Body
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Body *</label>
                 <textarea
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
-                  placeholder="Example: Use code EID40 to save on your next order!"
-                  rows={4}
-                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="e.g., Use code EID40..."
+                  rows={5}
+                  maxLength={500}
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white placeholder-gray-500 focus:ring-2 focus:ring-blue-400 resize-none"
                 />
+                <p className="text-xs text-gray-500 mt-1 text-right">{body.length}/500</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-300 mb-1">
-                  Where the user should land
-                </label>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Open Screen</label>
                 <select
                   value={selectedAction}
                   onChange={(e) => setSelectedAction(e.target.value)}
-                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-2 text-white shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  className="w-full rounded-xl border border-white/20 bg-white/5 px-4 py-3 text-white focus:ring-2 focus:ring-blue-400"
                 >
-                  <option value="home">Home</option>
-                  <option value="cart">Cart</option>
-                  <option value="account">Account</option>
-                  <option value="orders">Orders</option>
+                  <option value="home">🏠 Home</option>
+                  <option value="cart">🛒 Cart</option>
+                  <option value="account">👤 Account</option>
+                  <option value="orders">📦 Orders</option>
                 </select>
               </div>
 
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex gap-3">
                 <button
                   onClick={sendNotificationToAll}
-                  disabled={loading}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2 text-white shadow hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={loading || !title.trim() || !body.trim()}
+                  className={`flex-1 inline-flex items-center justify-center gap-2 rounded-xl px-6 py-3 font-semibold ${
+                    loading || !title.trim() || !body.trim()
+                      ? "bg-gray-600 opacity-60 cursor-not-allowed"
+                      : "bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+                  }`}
                 >
-                  {loading ? "Sending…" : "Send broadcast"}
+                  {loading ? (
+                    <>
+                      <FaSync className="animate-spin" />
+                      Sending...
+                    </>
+                  ) : (
+                    <>
+                      <FaAndroid />
+                      Send to {stats.enabledPushTokens} devices
+                    </>
+                  )}
                 </button>
 
-                {status && (
-                  <span className="text-sm text-gray-300">{status}</span>
-                )}
+                <button
+                  onClick={fetchStats}
+                  disabled={loading}
+                  className="rounded-xl border border-white/20 bg-white/5 px-4 py-3 hover:bg-white/10"
+                >
+                  <FaSync />
+                </button>
               </div>
+
+              {status && (
+                <div className={`rounded-xl p-4 text-sm font-medium ${
+                  status.includes("✅") ? "bg-green-500/20 border border-green-500/50 text-green-300" :
+                  "bg-red-500/20 border border-red-500/50 text-red-300"
+                }`}>
+                  {status}
+                </div>
+              )}
             </div>
 
             {/* Templates */}
-            <div className="mt-6">
-              <h3 className="text-sm font-semibold text-white/80 mb-2">
-                Quick templates
-              </h3>
-              <div className="flex flex-wrap gap-2">
+            <div className="mt-6 pt-6 border-t border-white/20">
+              <h3 className="text-sm font-semibold mb-3">📝 Quick Templates</h3>
+              <div className="grid grid-cols-2 gap-2">
                 {NOTIFICATION_TEMPLATES.map((t) => (
                   <button
                     key={t.id}
                     onClick={() => useTemplate(t)}
-                    className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-white/10"
+                    disabled={loading}
+                    className="rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs text-white hover:bg-white/10 text-left"
                   >
-                    {t.title}
+                    <span className="block truncate font-semibold">{t.title}</span>
+                    <span className="block text-gray-400 truncate text-[10px] mt-1">
+                      {t.body.substring(0, 40)}...
+                    </span>
                   </button>
                 ))}
               </div>
             </div>
           </div>
 
-          {/* History Section */}
+          {/* History */}
           <div className="rounded-2xl border border-white/20 bg-white/10 p-6 shadow-lg backdrop-blur-xl">
             <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
-              <FaHistory /> Recent broadcasts
+              <FaHistory /> Recent Broadcasts
             </h2>
+            
             {notificationHistory.length === 0 ? (
-              <p className="text-gray-400">
-                No history yet — send one to see it here.
-              </p>
+              <div className="text-center py-16 text-gray-400">
+                <FaBell className="text-5xl mx-auto mb-4 opacity-30" />
+                <p>No broadcasts yet</p>
+              </div>
             ) : (
-              <ul className="space-y-3 max-h-96 overflow-y-auto">
+              <ul className="space-y-3 max-h-[600px] overflow-y-auto pr-2">
                 {notificationHistory.map((item) => (
-                  <li
-                    key={item.id}
-                    className="rounded-xl border border-white/10 bg-white/5 p-4"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-semibold text-white">{item.title}</p>
-                        <p className="text-sm text-gray-300">{item.body}</p>
-                        <p className="text-xs text-gray-400 mt-1">
-                          Sent to: {item.totalSent || 0} users
-                          {item.invalidTokensRemoved > 0 &&
-                            ` (${item.invalidTokensRemoved} invalid removed)`}
-                        </p>
+                  <li key={item.id} className="rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10">
+                    <div className="flex justify-between gap-3">
+                      <div className="flex-1">
+                        <p className="font-semibold text-white truncate">{item.title}</p>
+                        <p className="text-sm text-gray-300 line-clamp-2 mt-1">{item.body}</p>
+                        
+                        <div className="flex gap-2 mt-3">
+                          <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full">
+                            📤 {item.totalSent || 0} sent
+                          </span>
+                          {item.invalidTokensRemoved > 0 && (
+                            <span className="text-xs bg-red-500/20 text-red-300 px-2 py-1 rounded-full">
+                              🗑️ {item.invalidTokensRemoved}
+                            </span>
+                          )}
+                        </div>
                       </div>
+                      
                       <button
                         onClick={() => deleteFromHistory(item.id)}
-                        className="text-sm font-medium text-red-400 hover:text-red-300"
+                        className="text-red-400 hover:bg-red-500/20 p-2 rounded-lg"
                       >
                         <FaTrash />
                       </button>
                     </div>
-                    <p className="mt-2 text-xs text-gray-500">
-                      {item.sentAt?.toDate
-                        ? item.sentAt.toDate().toLocaleString()
-                        : "—"}
+                    
+                    <p className="mt-3 text-xs text-gray-500">
+                      🕐 {item.sentAt?.toDate?.()?.toLocaleString() || "—"}
                     </p>
                   </li>
                 ))}
@@ -366,6 +529,13 @@ export default function SendNotificationScreen() {
             )}
           </div>
         </section>
+
+        <footer className="text-center text-xs text-gray-500 pt-6 border-t border-white/10">
+          <p>Backend: <code className="bg-white/10 px-2 py-1 rounded">{BACKEND_URL}</code></p>
+          <p className="mt-2">
+            <FaAndroid className="inline text-green-400" /> FCM Only • No Expo Errors
+          </p>
+        </footer>
       </div>
     </div>
   );

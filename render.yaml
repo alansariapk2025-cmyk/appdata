@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: my-broadcast-app
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false
+      - key: VITE_IMGBB_API_KEY
+        value: ef9d0b251bee75fdddbe00900bef8b33

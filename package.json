@@ -1,13 +1,15 @@
 {
-  "name": "my-app",
+  "name": "my-broadcast-app",
   "private": true,
-  "version": "1.0.0",
+  "version": "4.0.0",
   "type": "module",
+  "description": "Firebase Cloud Messaging Push Notification Server",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "server": "node server.cjs",
+    "server:dev": "nodemon server.cjs",
     "start": "node server.cjs"
   },
   "dependencies": {
@@ -17,18 +19,20 @@
     "browser-image-compression": "^2.0.2",
     "chart.js": "^4.5.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "file-saver": "^2.0.5",
     "firebase": "^11.10.0",
     "firebase-admin": "^13.7.0",
+    "idb": "^8.0.3",
     "jsbarcode": "^3.12.1",
     "jspdf": "^2.5.2",
     "jspdf-autotable": "^3.8.4",
     "lucide-react": "^0.525.0",
     "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
-    "react-dom": "^18.3.1",
     "react-chartjs-2": "^5.3.0",
+    "react-dom": "^18.3.1",
     "react-easy-crop": "^5.5.3",
     "react-hot-toast": "^2.6.0",
     "react-icons": "^5.5.0",
@@ -44,8 +48,13 @@
     "autoprefixer": "^10.4.21",
     "eslint": "^9.25.0",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "nodemon": "^3.0.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.11",
     "vite": "^6.3.5"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
   }
 }

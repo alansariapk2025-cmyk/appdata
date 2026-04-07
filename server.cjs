@@ -1,49 +1,91 @@
+// ================================================================
+// 📁 server.cjs - FCM ONLY (No Expo)
+// ✅ Sirf Firebase Cloud Messaging use karega
+// ================================================================
+
 const express = require("express");
 const admin = require("firebase-admin");
-const axios = require("axios");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 
-const app = express();
-app.use(cors());
-app.use(express.json());
+try {
+  require('dotenv').config();
+} catch (e) {
+  console.log("⚠️ dotenv not available");
+}
 
-// ============================================
-// ✅ FIREBASE INITIALIZE (ONCE)
-// ============================================
+const app = express();
+
+// ================================================================
+// ✅ CORS
+// ================================================================
+app.use(cors({
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    const allowedOrigins = [
+      /^http:\/\/localhost:\d+$/,
+      /^http:\/\/127\.0\.0\.1:\d+$/,
+      /^https:\/\/.*\.onrender\.com$/,
+      'https://my-broadcast-app.onrender.com',
+    ];
+    
+    const isAllowed = allowedOrigins.some(pattern => {
+      if (pattern instanceof RegExp) return pattern.test(origin);
+      return pattern === origin;
+    });
+    
+    callback(null, isAllowed);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+  maxAge: 86400
+}));
+
+app.options('*', cors());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// ================================================================
+// ✅ Firebase Init
+// ================================================================
 let serviceAccount;
 
 try {
   if (process.env.FIREBASE_SERVICE_ACCOUNT) {
     serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    console.log("✅ Firebase: ENV se load hua");
+    console.log("✅ Firebase: ENV se load");
   } else {
-    serviceAccount = JSON.parse(
-      fs.readFileSync("./serviceAccountKey.json", "utf8")
-    );
-    console.log("✅ Firebase: File se load hua");
+    const keyPath = process.env.SERVICE_ACCOUNT_PATH || "./serviceAccountKey.json";
+    if (!fs.existsSync(keyPath)) {
+      throw new Error(`File not found: ${keyPath}`);
+    }
+    serviceAccount = JSON.parse(fs.readFileSync(keyPath, "utf8"));
+    console.log(`✅ Firebase: ${keyPath} se load`);
+  }
+  
+  if (!serviceAccount.project_id || !serviceAccount.private_key) {
+    throw new Error("Invalid service account");
   }
 } catch (err) {
   console.error("❌ Firebase load failed:", err.message);
   process.exit(1);
 }
 
-// ✅ Sirf ek baar initialize
 if (!admin.apps.length) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount),
   });
-  console.log("✅ Firebase Admin initialized");
+  console.log("✅ Firebase initialized");
 }
 
 const db = admin.firestore();
 
-// ============================================
-// ✅ HELPERS
-// ============================================
-
-// Array ko chunks me todna
+// ================================================================
+// ✅ Helper Functions
+// ================================================================
 function chunkArray(array, size) {
   const result = [];
   for (let i = 0; i < array.length; i += size) {
@@ -52,456 +94,340 @@ function chunkArray(array, size) {
   return result;
 }
 
-// Duplicate tokens remove karna
-function removeDuplicateTokens(users) {
-  const seen = new Set();
-  return users.filter((user) => {
-    if (seen.has(user.token)) return false;
-    seen.add(user.token);
-    return true;
-  });
-}
-
-// ============================================
-// ✅ SERVE FRONTEND (dist folder)
-// ============================================
+// ================================================================
+// ✅ Serve Frontend
+// ================================================================
 const distPath = path.join(__dirname, "dist");
-
 if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
-  console.log("✅ Frontend: dist/ serve ho raha hai");
-} else {
-  // Root folder me index.html check karo
-  const rootIndex = path.join(__dirname, "index.html");
-  if (fs.existsSync(rootIndex)) {
-    app.use(express.static(__dirname));
-    console.log("✅ Frontend: root index.html serve ho raha hai");
-  } else {
-    console.log("⚠️ Frontend files nahi mili");
-  }
+  console.log("✅ Serving dist/");
 }
 
-// ============================================
-// ✅ HEALTH CHECK
-// ============================================
-app.get("/health", (req, res) => {
+// ================================================================
+// ✅ Health Routes
+// ================================================================
+app.get("/", (req, res) => {
   res.json({
-    status: "✅ Server Live",
-    time: new Date().toISOString(),
-    firebase: admin.apps.length > 0 ? "Connected" : "Disconnected",
-    frontend: fs.existsSync(distPath) ? "dist/ ready" : "dist/ missing",
-    port: process.env.PORT || 5000,
+    status: "online",
+    service: "FCM Push Notification Server",
+    timestamp: new Date().toISOString(),
+    version: "4.0.0 (FCM Only)"
   });
 });
 
-// ============================================
-// ✅ SEND BROADCAST (Main Route)
-// ============================================
-app.post("/send-broadcast", async (req, res) => {
-  try {
-    const { title, body, link } = req.body;
-
-    // Validation
-    if (!title || !body) {
-      return res.status(400).json({
-        error: "Title aur body required hai",
-      });
-    }
-
-    console.log("🚀 Broadcast started:", { title, body, link });
-
-    let users = [];
-
-    // ✅ push_tokens collection se fetch
-    try {
-      const pushTokensSnapshot = await db
-        .collection("push_tokens")
-        .where("pushEnabled", "==", true)
-        .get();
-
-      pushTokensSnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.expoPushToken && data.expoPushToken.trim() !== "") {
-          users.push({
-            id: doc.id,
-            token: data.expoPushToken.trim(),
-            collection: "push_tokens",
-          });
-        }
-      });
-
-      console.log(`📱 push_tokens se: ${users.length} tokens`);
-    } catch (e) {
-      console.log("⚠️ push_tokens collection nahi mili:", e.message);
-    }
-
-    // ✅ users collection se fetch
-    try {
-      const usersSnapshot = await db
-        .collection("users")
-        .where("pushEnabled", "==", true)
-        .get();
-
-      usersSnapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.expoPushToken && data.expoPushToken.trim() !== "") {
-          users.push({
-            id: doc.id,
-            token: data.expoPushToken.trim(),
-            collection: "users",
-          });
-        }
-      });
-
-      console.log(`📱 Total (before dedup): ${users.length} tokens`);
-    } catch (e) {
-      console.log("⚠️ users collection nahi mili:", e.message);
-    }
-
-    // ✅ Duplicates remove karo
-    users = removeDuplicateTokens(users);
-    console.log(`✅ Unique tokens: ${users.length}`);
-
-    if (users.length === 0) {
-      return res.json({
-        success: true,
-        totalTokens: 0,
-        message: "Koi valid token nahi mila",
-      });
-    }
-
-    // ✅ Chunks me bhejo (100 per chunk - Expo limit)
-    const chunks = chunkArray(users, 100);
-    let totalSent = 0;
-    let invalidTokensRemoved = 0;
-    let failedCount = 0;
-
-    for (let ci = 0; ci < chunks.length; ci++) {
-      const chunk = chunks[ci];
-
-      const messages = chunk.map((user) => ({
-        to: user.token,
-        sound: "default",
-        title,
-        body,
-        data: { link: link || "/home" },
-      }));
-
-      try {
-        // ✅ Expo Push API call
-        const response = await axios.post(
-          "https://exp.host/--/api/v2/push/send",
-          messages,
-          {
-            headers: {
-              "Content-Type": "application/json",
-              Accept: "application/json",
-              "Accept-Encoding": "gzip, deflate",
-            },
-            timeout: 30000, // 30 second timeout
-          }
-        );
-
-        const results = response.data.data;
-
-        console.log(
-          `📦 Chunk ${ci + 1}/${chunks.length}: ${chunk.length} messages sent`
-        );
-
-        // ✅ Invalid tokens handle karo
-        for (let j = 0; j < results.length; j++) {
-          if (results[j].status === "error") {
-            const errorType = results[j].details?.error;
-            console.log(`❌ Token error: ${errorType} for ${chunk[j].token.substring(0, 20)}...`);
-
-            if (errorType === "DeviceNotRegistered") {
-              // Invalid token Firestore se remove karo
-              try {
-                await db
-                  .collection(chunk[j].collection)
-                  .doc(chunk[j].id)
-                  .update({
-                    expoPushToken: admin.firestore.FieldValue.delete(),
-                    pushEnabled: false,
-                  });
-                invalidTokensRemoved++;
-                console.log(`🗑️ Invalid token removed: doc ${chunk[j].id}`);
-              } catch (updateErr) {
-                console.error("❌ Token remove error:", updateErr.message);
-              }
-            }
-          }
-        }
-
-        totalSent += messages.length;
-
-      } catch (chunkError) {
-        console.error(`❌ Chunk ${ci + 1} error:`, chunkError.message);
-        failedCount += chunk.length;
-      }
-
-      // ✅ Chunks ke beech thoda wait (rate limiting avoid)
-      if (ci < chunks.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 100));
-      }
-    }
-
-    // ✅ History Firestore me save karo
-    try {
-      await db.collection("notification_history").add({
-        title,
-        body,
-        link: link || null,
-        totalSent,
-        invalidTokensRemoved,
-        failedCount,
-        sentAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      console.log("📝 History saved");
-    } catch (histErr) {
-      console.error("❌ History save error:", histErr.message);
-    }
-
-    console.log(
-      `✅ Broadcast complete: ${totalSent} sent, ${invalidTokensRemoved} invalid removed, ${failedCount} failed`
-    );
-
-    return res.json({
-      success: true,
-      totalTokens: totalSent,
-      invalidTokensRemoved,
-      failedCount,
-      chunks: chunks.length,
-    });
-
-  } catch (error) {
-    console.error("❌ Broadcast error:", error);
-    return res.status(500).json({
-      error: error.message,
-    });
-  }
+app.get("/ping", (req, res) => {
+  res.json({ pong: true, time: Date.now() });
 });
 
-// ============================================
-// ✅ PUSH STATS
-// ============================================
+app.get("/health", (req, res) => {
+  res.json({
+    status: "✅ Healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    firebase: { connected: admin.apps.length > 0 },
+    mode: "FCM_ONLY",
+    port: process.env.PORT || 5000
+  });
+});
+
+// ================================================================
+// ✅ Stats API (FCM Only)
+// ================================================================
 app.get("/push-stats", async (req, res) => {
   try {
-    const pushTokensSnap = await db.collection("push_tokens").get();
-    const usersSnap = await db.collection("users").get();
+    const [pushTokensSnapshot, usersSnapshot] = await Promise.all([
+      db.collection("push_tokens").get(),
+      db.collection("users").get()
+    ]);
 
-    let enabledPushTokens = 0;
-    let guestTokens = 0;
-    let userTokens = 0;
+    let enabledDevices = 0;
+    let fcmCount = 0;
+    let guestCount = 0;
+    let userCount = 0;
 
-    pushTokensSnap.forEach((doc) => {
+    pushTokensSnapshot.forEach((doc) => {
       const data = doc.data();
-      if (data.pushEnabled === true && data.expoPushToken) {
-        enabledPushTokens++;
-        if (data.isGuest === true) guestTokens++;
-        else userTokens++;
+      
+      if (data?.pushEnabled === true && data?.fcmToken && data.fcmToken.trim() !== "") {
+        enabledDevices++;
+        fcmCount++;
+        
+        if (data?.isGuest === true) {
+          guestCount++;
+        } else {
+          userCount++;
+        }
       }
-    });
-
-    // Notification history
-    const historySnap = await db
-      .collection("notification_history")
-      .orderBy("sentAt", "desc")
-      .limit(5)
-      .get();
-
-    const recentHistory = [];
-    historySnap.forEach((doc) => {
-      recentHistory.push({ id: doc.id, ...doc.data() });
     });
 
     res.json({
       success: true,
       stats: {
-        totalPushTokenRecords: pushTokensSnap.size,
-        enabledPushTokens,
-        guestTokens,
-        userTokens,
-        totalUsers: usersSnap.size,
+        total: pushTokensSnapshot.size,
+        enabled: enabledDevices,
+        fcm: fcmCount,
+        guests: guestCount,
+        users: userCount,
+        totalUsers: usersSnapshot.size
       },
-      recentBroadcasts: recentHistory,
+      mode: "FCM_ONLY",
+      timestamp: new Date().toISOString()
     });
-
   } catch (error) {
-    console.error("❌ Push stats error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("❌ Stats error:", error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-// ============================================
-// ✅ NOTIFICATION HISTORY
-// ============================================
-app.get("/notification-history", async (req, res) => {
+// ================================================================
+// ✅ SEND BROADCAST (FCM ONLY)
+// ================================================================
+app.post("/send-broadcast", async (req, res) => {
   try {
-    const snap = await db
-      .collection("notification_history")
-      .orderBy("sentAt", "desc")
-      .limit(20)
-      .get();
+    const { title, body, link } = req.body;
 
-    const history = [];
-    snap.forEach((doc) => {
-      history.push({ id: doc.id, ...doc.data() });
-    });
+    if (!title || !body) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Title aur body required" 
+      });
+    }
 
-    res.json({ success: true, history });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+    console.log("🚀 FCM Broadcast started:", { title, body });
 
-// ============================================
-// ✅ INIT DEMO ADMIN
-// ============================================
-app.post("/init-demo-admin", async (req, res) => {
-  try {
-    const demoEmail = "demo.admin@ansari.com";
-    const demoPassword = "Demo1234";
-    const demoName = "Demo Admin";
+    const deviceTokenMap = new Map();
 
-    let userRecord;
+    // ✅ Fetch push_tokens (FCM only)
     try {
-      userRecord = await admin.auth().getUserByEmail(demoEmail);
-      console.log("✅ Demo admin already exists");
-    } catch {
-      userRecord = null;
-    }
-
-    if (!userRecord) {
-      userRecord = await admin.auth().createUser({
-        email: demoEmail,
-        password: demoPassword,
-        displayName: demoName,
-      });
-      console.log("✅ Demo admin created");
-    }
-
-    await db.collection("admins").doc(userRecord.uid).set(
-      {
-        uid: userRecord.uid,
-        fullName: demoName,
-        email: demoEmail,
-        role: "admin",
-        isDemo: true,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    res.json({
-      success: true,
-      email: demoEmail,
-      password: demoPassword,
-    });
-
-  } catch (error) {
-    console.error("❌ Init demo admin error:", error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// ============================================
-// ✅ CREATE ADMIN
-// ============================================
-app.post("/create-admin", async (req, res) => {
-  try {
-    const { fullName, email, password } = req.body;
-
-    if (!fullName || !email || !password || password.length < 6) {
-      return res.status(400).json({
-        error: "fullName, email, password (min 6 chars) required",
-      });
-    }
-
-    // ✅ User create karo Firebase Auth me
-    const userRecord = await admin.auth().createUser({
-      email,
-      password,
-      displayName: fullName,
-    });
-
-    // ✅ Firestore me save karo
-    await db.collection("admins").doc(userRecord.uid).set({
-      uid: userRecord.uid,
-      fullName,
-      email,
-      role: "admin",
-      isDemo: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
-
-    // ✅ Demo admin delete karo (agar real admin ban gaya)
-    const demoEmail = "demo.admin@ansari.com";
-    if (email !== demoEmail) {
-      try {
-        const demoUser = await admin.auth().getUserByEmail(demoEmail);
-        if (demoUser) {
-          await admin.auth().deleteUser(demoUser.uid);
-          await db.collection("admins").doc(demoUser.uid).delete();
-          console.log("🗑️ Demo admin deleted");
+      const pushSnap = await db
+        .collection("push_tokens")
+        .where("pushEnabled", "==", true)
+        .get();
+      
+      pushSnap.forEach((doc) => {
+        const data = doc.data();
+        const deviceId = doc.id;
+        
+        // ✅ Only FCM tokens
+        if (data.fcmToken && data.fcmToken.trim() !== "") {
+          deviceTokenMap.set(deviceId, {
+            id: deviceId,
+            token: data.fcmToken,
+            collection: "push_tokens"
+          });
         }
-      } catch (e) {
-        // Demo user nahi tha - ignore
+      });
+      
+      console.log(`✅ push_tokens: ${pushSnap.size} total, ${deviceTokenMap.size} with FCM`);
+    } catch (e) {
+      console.error("⚠️ push_tokens error:", e.message);
+    }
+
+    // ✅ Fetch users (backup)
+    try {
+      const usersSnap = await db
+        .collection("users")
+        .where("pushEnabled", "==", true)
+        .get();
+      
+      usersSnap.forEach((doc) => {
+        const data = doc.data();
+        const userId = doc.id;
+        
+        if (deviceTokenMap.has(userId)) return;
+        
+        if (data.fcmToken && data.fcmToken.trim() !== "") {
+          deviceTokenMap.set(userId, {
+            id: userId,
+            token: data.fcmToken,
+            collection: "users"
+          });
+        }
+      });
+      
+      console.log(`✅ users: ${usersSnap.size} total`);
+    } catch (e) {
+      console.error("⚠️ users error:", e.message);
+    }
+
+    const allDevices = Array.from(deviceTokenMap.values());
+    
+    console.log(`✅ Total FCM devices: ${allDevices.length}`);
+
+    if (allDevices.length === 0) {
+      return res.json({
+        success: true,
+        message: "No FCM tokens found",
+        totalDevices: 0,
+        totalSent: 0,
+        invalidTokensRemoved: 0
+      });
+    }
+
+    let fcmSuccess = 0;
+    let invalidTokensRemoved = 0;
+
+    // ✅ Send FCM
+    console.log(`📤 Sending to ${allDevices.length} FCM tokens...`);
+    
+    const fcmChunks = chunkArray(allDevices, 500);
+    
+    for (const chunk of fcmChunks) {
+      try {
+        const response = await admin.messaging().sendEachForMulticast({
+          tokens: chunk.map(d => d.token),
+          notification: { 
+            title, 
+            body 
+          },
+          data: { 
+            link: link || "/home",
+            timestamp: Date.now().toString()
+          },
+          android: { 
+            priority: "high",
+            notification: {
+              channelId: "default",
+              sound: "default",
+              priority: "high"
+            }
+          },
+          apns: {
+            payload: {
+              aps: {
+                sound: "default",
+                badge: 1
+              }
+            }
+          }
+        });
+
+        fcmSuccess += response.successCount;
+
+        response.responses.forEach((resp, idx) => {
+          if (!resp.success) {
+            const errorCode = resp.error?.code;
+            
+            console.warn(`⚠️ FCM error for ${chunk[idx].id}:`, errorCode);
+            
+            if (
+              errorCode === "messaging/invalid-registration-token" ||
+              errorCode === "messaging/registration-token-not-registered"
+            ) {
+              db.collection(chunk[idx].collection)
+                .doc(chunk[idx].id)
+                .update({ fcmToken: admin.firestore.FieldValue.delete() })
+                .catch(() => {});
+              
+              invalidTokensRemoved++;
+              console.log(`🗑️ Removed invalid token: ${chunk[idx].id}`);
+            }
+          }
+        });
+      } catch (error) {
+        console.error("❌ FCM batch error:", error.message);
       }
     }
+    
+    console.log(`✅ FCM sent: ${fcmSuccess}/${allDevices.length}`);
 
-    res.json({
+    // ✅ Save history
+    try {
+      await db.collection("notification_history").add({
+        title,
+        body,
+        link: link || null,
+        totalDevices: allDevices.length,
+        totalSent: fcmSuccess,
+        invalidTokensRemoved,
+        sentAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+    } catch (error) {
+      console.error("⚠️ History save failed:", error.message);
+    }
+
+    console.log(`🎉 Complete: ${fcmSuccess} sent to ${allDevices.length} devices`);
+
+    return res.json({
       success: true,
-      uid: userRecord.uid,
-      email: userRecord.email,
-      fullName: userRecord.displayName,
+      totalDevices: allDevices.length,
+      totalSent: fcmSuccess,
+      invalidTokensRemoved,
+      message: `FCM sent to ${fcmSuccess}/${allDevices.length} devices`
     });
 
   } catch (error) {
-    console.error("❌ Create admin error:", error);
-    res.status(500).json({ error: error.message });
+    console.error("❌ Broadcast error:", error);
+    return res.status(500).json({ 
+      success: false,
+      error: error.message
+    });
   }
 });
 
-// ============================================
-// ✅ SPA CATCH-ALL (Frontend React Router)
-// ============================================
-app.get("*", (req, res) => {
-  // API routes
-  if (
-    req.path.startsWith("/send-broadcast") ||
-    req.path.startsWith("/push-stats") ||
-    req.path.startsWith("/health") ||
-    req.path.startsWith("/create-admin") ||
-    req.path.startsWith("/init-demo-admin") ||
-    req.path.startsWith("/notification-history")
-  ) {
-    return res.status(404).json({ error: "Route not found" });
+// ================================================================
+// ✅ Notification History
+// ================================================================
+app.get("/notification-history", async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 20;
+    
+    const snapshot = await db
+      .collection("notification_history")
+      .orderBy("sentAt", "desc")
+      .limit(limit)
+      .get();
+
+    const history = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data(),
+      sentAt: doc.data().sentAt?.toDate?.()?.toISOString() || null
+    }));
+
+    res.json({ 
+      success: true, 
+      history,
+      count: history.length
+    });
+  } catch (error) {
+    console.error("❌ History error:", error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
   }
+});
 
-  // Frontend serve
+// ================================================================
+// ✅ Catch-All
+// ================================================================
+app.get("*", (req, res) => {
   const distIndex = path.join(__dirname, "dist", "index.html");
-  const rootIndex = path.join(__dirname, "index.html");
-
   if (fs.existsSync(distIndex)) {
     res.sendFile(distIndex);
-  } else if (fs.existsSync(rootIndex)) {
-    res.sendFile(rootIndex);
   } else {
-    res.status(404).send(`
-      <h2>⚠️ Frontend not found</h2>
-      <p>Run: <code>npm run build</code></p>
-    `);
+    res.status(404).json({ error: "Not found" });
   }
 });
 
-// ============================================
-// ✅ START SERVER
-// ============================================
+// ================================================================
+// ✅ Start Server
+// ================================================================
 const PORT = process.env.PORT || 5000;
+const HOST = process.env.HOST || '0.0.0.0';
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server: http://localhost:${PORT}`);
-  console.log(`❤️  Health: http://localhost:${PORT}/health`);
-  console.log(`📊 Stats:  http://localhost:${PORT}/push-stats`);
+app.listen(PORT, HOST, () => {
+  console.log("\n" + "=".repeat(60));
+  console.log("🚀 FCM Push Notification Server");
+  console.log("=".repeat(60));
+  console.log(`📍 http://localhost:${PORT}`);
+  console.log(`📊 Stats:    /push-stats`);
+  console.log(`🔔 Broadcast: POST /send-broadcast`);
+  console.log("=".repeat(60));
+  console.log(`✅ Mode: FCM ONLY (No Expo)`);
+  console.log(`✅ Firebase Project: ${serviceAccount.project_id}`);
+  console.log("=".repeat(60) + "\n");
 });
+
+process.on('SIGTERM', () => process.exit(0));
+process.on('SIGINT', () => process.exit(0));
