@@ -3,7 +3,8 @@ import { collection, collectionGroup, getDocs, updateDoc, doc, serverTimestamp, 
 import { db } from "../firebase";
 import { FaSearch, FaSave, FaSync, FaCheckCircle, FaTimes, FaChevronDown, FaChevronLeft, FaChevronRight, FaLock, FaFilter, FaFileExcel, FaFileImport, FaDownload, FaSortAmountDown, FaSortAmountUp, FaPercent, FaCalculator } from "react-icons/fa";
 import toast, { Toaster } from "react-hot-toast";
-import * as XLSX from "xlsx";
+import * as Excel from "exceljs";
+import { saveAs } from "file-saver";
 
 const num = (v) => (typeof v === "number" && !isNaN(v) ? v : Number(v) || 0);
 const formatPrice = (p) => `PKR ${num(p).toLocaleString()}`;
@@ -356,13 +357,21 @@ export default function PriceManagement() {
     if (!file) return;
     const t = toast.loading("Importing...");
     const reader = new FileReader();
-
     reader.onload = async (evt) => {
       try {
-        const wb = XLSX.read(evt.target?.result, { type: "binary" });
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        const wb = new Excel.Workbook();
+        await wb.xlsx.load(evt.target?.result);
+        const ws = wb.getWorksheet(1);
+        const data = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const values = row.values.slice(1);
+          const headers = ws.getRow(1).values.slice(1);
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = values[i]; });
+          data.push(obj);
+        });
         if (!data.length) return toast.error("No data!", { id: t });
-
         let updated = 0;
         for (const row of data) {
           const sku = row.SKU || row.sku;
@@ -379,27 +388,29 @@ export default function PriceManagement() {
             }
           }
         }
-
         toast.success(`Updated ${updated} prices!`, { id: t });
         handleRefresh();
       } catch {
         toast.error("Import failed!", { id: t });
       }
     };
-
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
     if (fileRef.current) fileRef.current.value = "";
     setShowImport(false);
   };
 
-  const downloadTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([
+  const downloadTemplate = async () => {
+    const templateData = [
       { SKU: "PROD001", "New Price": 500 },
       { SKU: "PROD002", "New Price": 1200 }
-    ]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Template");
-    XLSX.writeFile(wb, "price_update_template.xlsx");
+    ];
+    const wb = new Excel.Workbook();
+    const ws = wb.addWorksheet("Template");
+    ws.columns = Object.keys(templateData[0]).map(k => ({ header: k, key: k }));
+    templateData.forEach(row => ws.addRow(row));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/octet-stream" });
+    saveAs(blob, "price_update_template.xlsx");
     toast.success("Template downloaded!");
   };
 

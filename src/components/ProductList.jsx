@@ -3,7 +3,8 @@ import { collection, collectionGroup, getDocs, updateDoc, deleteDoc, doc, writeB
 import { db } from "../firebase";
 import toast, { Toaster } from "react-hot-toast";
 import { FaEdit, FaSave, FaTimes, FaBox, FaTrash, FaSearch, FaChevronLeft, FaChevronRight, FaFilter, FaSortAmountDown, FaSortAmountUp, FaCheckCircle, FaDownload, FaSync, FaList, FaThLarge, FaImage, FaToggleOn, FaToggleOff, FaChartBar, FaRupeeSign, FaCubes, FaFire, FaFileExcel, FaFileCsv, FaCloudDownloadAlt, FaCloudUploadAlt, FaCheckDouble, FaBan, FaStar, FaRegStar, FaWarehouse, FaExclamationTriangle, FaWifi } from "react-icons/fa";
-import *as XLSX from "xlsx";
+import { Workbook } from "exceljs";
+import { saveAs } from "file-saver";
 
 const num = v => typeof v === "number" && !isNaN(v) ? v : Number(v) || 0;
 const formatPrice = p => `PKR ${num(p).toLocaleString()}`;
@@ -266,18 +267,29 @@ export default function ProductList() {
     finally { setBulkUpdating(false); }
   };
 
-  const exportData = (type, format) => {
+  const exportData = async (type, format) => {
     const data = (type === "all" ? allProducts : filteredProducts).map(p => ({
       "Name (EN)": p.nameEn || "", "Name (UR)": p.nameUr || "", Category: p.categoryName || "", "Price (PKR)": num(p.price), MRP: num(p.mrpPrice),
       "Discount (Off)": num(p.discount), Stock: num(p.stock), Unit: p.unit || "", Status: p.status || "inactive", Popular: p.mostPopular ? "Yes" : "No",
       Reselling: p.reselling ? "Yes" : "No", SKU: p.sku || "", Image: p.image || "",
     }));
-    const ws = XLSX.utils.json_to_sheet(data), wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Products");
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Products");
+    if (data.length > 0) {
+      ws.columns = Object.keys(data[0]).map(k => ({ header: k, key: k }));
+      data.forEach(row => ws.addRow(row));
+    }
     if (format === "csv") {
-      const csv = XLSX.utils.sheet_to_csv(ws), blob = new Blob([csv], { type: "text/csv" }), link = document.createElement("a");
-      link.href = URL.createObjectURL(blob); link.download = `products_${type}_${new Date().toISOString().split("T")[0]}.csv`; link.click();
-    } else XLSX.writeFile(wb, `products_${type}_${new Date().toISOString().split("T")[0]}.xlsx`);
+      const csv = data.map(row => Object.values(row).join(",")).join("\n");
+      const headers = Object.keys(data[0] || {}).join(",");
+      const csv_content = headers + "\n" + csv;
+      const blob = new Blob([csv_content], { type: "text/csv" });
+      saveAs(blob, `products_${type}_${new Date().toISOString().split("T")[0]}.csv`);
+    } else {
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type: "application/octet-stream" });
+      saveAs(blob, `products_${type}_${new Date().toISOString().split("T")[0]}.xlsx`);
+    }
     toast.success(`Exported ${data.length} products!`); setShowExportModal(false);
   };
 
@@ -288,8 +300,18 @@ export default function ProductList() {
     const reader = new FileReader();
     reader.onload = async evt => {
       try {
-        const wb = XLSX.read(evt.target.result, { type: "binary" });
-        const data = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+        const wb = new Workbook();
+        await wb.xlsx.load(evt.target.result);
+        const ws = wb.getWorksheet(1);
+        const data = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const values = row.values.slice(1);
+          const headers = ws.getRow(1).values.slice(1);
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = values[i]; });
+          data.push(obj);
+        });
         if (!data.length) return toast.error("No data!", { id: t });
         if (!window.confirm(`Import ${data.length} products?`)) return toast.dismiss(t);
         const batch = writeBatch(db); let count = 0;
@@ -313,9 +335,16 @@ export default function ProductList() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const downloadTemplate = () => {
-    const ws = XLSX.utils.json_to_sheet([{ nameEn: "Product Name", nameUr: "اردو نام", categoryName: "Category", price: 100, mrpPrice: 120, discount: 10, stock: 50, unit: "kg", status: "active", mostPopular: "no", reselling: "no", sku: "SKU001", image: "" }]);
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Template"); XLSX.writeFile(wb, "import_template.xlsx"); toast.success("Template downloaded!");
+  const downloadTemplate = async () => {
+    const templateData = [{ nameEn: "Product Name", nameUr: "اردو نام", categoryName: "Category", price: 100, mrpPrice: 120, discount: 10, stock: 50, unit: "kg", status: "active", mostPopular: "no", reselling: "no", sku: "SKU001", image: "" }];
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Template");
+    ws.columns = Object.keys(templateData[0]).map(k => ({ header: k, key: k }));
+    templateData.forEach(row => ws.addRow(row));
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], { type: "application/octet-stream" });
+    saveAs(blob, "import_template.xlsx");
+    toast.success("Template downloaded!");
   };
 
   if (loading) return <div className="p-6 space-y-4">{[...Array(6)].map((_, i) => <div key={i} className="h-16 bg-gradient-to-r from-blue-100 to-purple-100 animate-pulse rounded-xl" />)}</div>;

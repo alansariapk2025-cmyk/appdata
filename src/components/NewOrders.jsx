@@ -26,7 +26,8 @@ import {
   FaUpload,
   FaFilter,
 } from "react-icons/fa";
-import * as XLSX from "xlsx";
+import * as Excel from "exceljs";
+import { saveAs } from "file-saver";
 
 const num = (v) => (typeof v === "number" && !isNaN(v) ? v : Number(v) || 0);
 
@@ -287,13 +288,21 @@ export default function NewOrders({ onNavigate }) {
   const handleImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
-        const wb = XLSX.read(evt.target.result, { type: "binary" });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const data = XLSX.utils.sheet_to_json(ws);
+        const wb = new Excel.Workbook();
+        await wb.xlsx.load(evt.target.result);
+        const ws = wb.getWorksheet(1);
+        const data = [];
+        ws.eachRow((row, rowNumber) => {
+          if (rowNumber === 1) return;
+          const values = row.values.slice(1);
+          const headers = ws.getRow(1).values.slice(1);
+          const obj = {};
+          headers.forEach((h, i) => { obj[h] = values[i]; });
+          data.push(obj);
+        });
         console.log("Imported data:", data);
         alert(`📥 Imported ${data.length} records. Check console for data.`);
         setShowImportModal(false);
@@ -302,7 +311,7 @@ export default function NewOrders({ onNavigate }) {
         alert("❌ Error importing file");
       }
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const clearFilters = () => {

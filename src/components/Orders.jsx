@@ -3,7 +3,8 @@ import { useEffect, useState, useMemo, useCallback } from "react";
 import { db } from "../firebase";
 import { collection, onSnapshot, updateDoc, deleteDoc, doc, query, orderBy } from "firebase/firestore";
 import { FaTrash, FaMotorcycle, FaSearch, FaDownload, FaUpload, FaFilter, FaTimes, FaSync, FaPrint, FaEye, FaBoxOpen, FaBell } from "react-icons/fa";
-import * as XLSX from "xlsx";
+import { Workbook } from "exceljs";
+import { saveAs } from "file-saver";
 
 const num = (v) => (typeof v === "number" && !isNaN(v) ? v : Number(v) || 0);
 

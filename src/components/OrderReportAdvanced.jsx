@@ -5,7 +5,7 @@ import { collection, query, orderBy, onSnapshot } from "firebase/firestore";
 import { Bar, Pie } from "react-chartjs-2";
 import "chart.js/auto";
 import { saveAs } from "file-saver";
-import * as XLSX from "xlsx";
+import { Workbook } from "exceljs";
 
 const num = (v) =>
   typeof v === "number" && !isNaN(v) ? v : Number(v) || 0;
@@ -212,25 +212,24 @@ export default function OrderReportAdvanced() {
     page * perPage
   );
 
-  const exportExcel = () => {
-    const ws = XLSX.utils.json_to_sheet(
-      filteredOrders.map((o) => ({
-        "Order ID": o.id,
-        Customer: o.customerName,
-        Category: o.category,
-        Total: o.total,
-        Cost: o.cost,
-        Profit: o.profit,
-        Date: o.date.toLocaleString(),
-        Status: o.status,
-      }))
-    );
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Orders");
-    const buf = XLSX.write(wb, {
-      bookType: "xlsx",
-      type: "array",
-    });
+  const exportExcel = async () => {
+    const wb = new Workbook();
+    const ws = wb.addWorksheet("Orders");
+    const data = filteredOrders.map((o) => ({
+      "Order ID": o.id,
+      Customer: o.customerName,
+      Category: o.category,
+      Total: o.total,
+      Cost: o.cost,
+      Profit: o.profit,
+      Date: o.date.toLocaleString(),
+      Status: o.status,
+    }));
+    if (data.length > 0) {
+      ws.columns = Object.keys(data[0]).map(k => ({ header: k, key: k }));
+      data.forEach(row => ws.addRow(row));
+    }
+    const buf = await wb.xlsx.writeBuffer();
     const blob = new Blob([buf], {
       type: "application/octet-stream",
     });
