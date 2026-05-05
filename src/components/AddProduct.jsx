@@ -160,13 +160,43 @@ export default function AddProduct() {
     }));
   };
 
-  // Handle Selling Price Change (reverse calculate margin)
+  // Handle Selling Price Change (reverse calculate margin and auto discount)
   const handlePriceChange = (value) => {
     const margin = calculateMargin(product.costPrice, value);
+    const price = num(value);
+    const mrp = num(product.mrpPrice);
+    
+    let autoDiscount = product.discount;
+    if (mrp > 0 && price > 0 && mrp > price) {
+      autoDiscount = Math.round(((mrp - price) / mrp) * 100);
+    } else if (mrp > 0 && price >= mrp) {
+      autoDiscount = 0;
+    }
+
     setProduct((prev) => ({
       ...prev,
       price: value,
       margin: margin > 0 ? margin : prev.margin,
+      discount: autoDiscount,
+    }));
+  };
+
+  // Handle MRP Change (auto discount)
+  const handleMrpChange = (value) => {
+    const mrp = num(value);
+    const price = num(product.price);
+    
+    let autoDiscount = product.discount;
+    if (mrp > 0 && price > 0 && mrp > price) {
+      autoDiscount = Math.round(((mrp - price) / mrp) * 100);
+    } else if (mrp > 0 && price >= mrp) {
+      autoDiscount = 0;
+    }
+
+    setProduct((prev) => ({
+      ...prev,
+      mrpPrice: value,
+      discount: autoDiscount,
     }));
   };
 
@@ -609,7 +639,7 @@ export default function AddProduct() {
                         type="number"
                         name="mrpPrice"
                         value={product.mrpPrice}
-                        onChange={handleChange}
+                        onChange={(e) => handleMrpChange(e.target.value)}
                         placeholder="0"
                         min="0"
                         className="w-full p-3 pl-10 rounded-xl border-2 border-gray-200 bg-white/80 backdrop-blur-sm outline-none focus:border-blue-500 transition"

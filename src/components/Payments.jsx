@@ -9,12 +9,13 @@ import {
   query,
   updateDoc,
   orderBy,
+  limit,
 } from "firebase/firestore";
 import { FaTrash, FaFileInvoice, FaSearch } from "react-icons/fa";
 import jsPDF from "jspdf";
 import "jspdf-autotable";
 import JsBarcode from "jsbarcode";
-import "../fonts/NotoNastaliqUrdu-Bold-normal";
+import html2canvas from "html2canvas";
 
 const num = (v) =>
   typeof v === "number" && !isNaN(v) ? v : Number(v) || 0;
@@ -25,11 +26,11 @@ export default function Payments() {
   const [statusFilter, setStatusFilter] = useState("All");
   const [searchTerm, setSearchTerm] = useState("");
   const [page, setPage] = useState(1);
+  const [invoiceLoading, setInvoiceLoading] = useState(null);
   const perPage = 15;
 
-  // 🔹 Realtime Fetch Orders (latest first)
   useEffect(() => {
-    const q = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+    const q = query(collection(db, "orders"), orderBy("createdAt", "desc"), limit(200));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
@@ -48,23 +49,17 @@ export default function Payments() {
     return () => unsubscribe();
   }, []);
 
-  // 🔹 Filter + Search (fast via useMemo)
   const filtered = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
-
     return orders.filter((o) => {
       const st = String(o.status || "Pending").toLowerCase();
-      if (statusFilter !== "All" && st !== statusFilter.toLowerCase()) {
+      if (statusFilter !== "All" && st !== statusFilter.toLowerCase())
         return false;
-      }
-
       if (!term) return true;
-
       const orderId = (o.orderId || o.id || "").toLowerCase();
       const name = (o.customerName || o.name || "").toLowerCase();
       const phone = (o.customerPhone || o.phone || "").toLowerCase();
       const email = (o.email || "").toLowerCase();
-
       return (
         orderId.includes(term) ||
         name.includes(term) ||
@@ -81,7 +76,6 @@ export default function Payments() {
     setPage(1);
   }, [statusFilter, searchTerm]);
 
-  // 🔹 Delete Order
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this order?")) return;
     try {
@@ -91,7 +85,6 @@ export default function Payments() {
     }
   };
 
-  // 🔹 Update Status
   const handleStatusChange = async (id, status) => {
     try {
       await updateDoc(doc(db, "orders", id), {
@@ -103,53 +96,15 @@ export default function Payments() {
     }
   };
 
-  // 🔹 Generate Invoice PDF with Urdu Support
-  const handleInvoice = (order) => {
+  const handleInvoice = async (order) => {
+    setInvoiceLoading(order.id);
+
     try {
-      const pdf = new jsPDF({
-        orientation: "p",
-        unit: "mm",
-        format: [80, 220],
-      });
-
-      let y = 8;
-      const pageWidth = pdf.internal.pageSize.getWidth();
-      const leftPadding = 4;
-      const rightPadding = pageWidth - 4;
-      const lineHeight = 4;
-
-      // ✅ Check available fonts
-      console.log("Available fonts:", pdf.getFontList());
-
-      // Header - English
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(12);
-      pdf.text("ANSARI TRADERS", pageWidth / 2, y, { align: "center" });
-      y += 5;
-
-      pdf.setFontSize(8);
-      pdf.setFont("helvetica", "normal");
-      pdf.text("Korangi, Karachi - Pakistan", pageWidth / 2, y, {
-        align: "center",
-      });
-      y += lineHeight;
-      pdf.text("Phone: 0213-5041666", pageWidth / 2, y, { align: "center" });
-      y += 6;
-
-      // Title
-      pdf.setFontSize(10);
-      pdf.setFont("helvetica", "bold");
-      pdf.text("SALE RECEIPT", pageWidth / 2, y, { align: "center" });
-      y += 3;
-      pdf.line(4, y, pageWidth - 4, y);
-      y += 5;
-
-      // Date
       const createdAt = order.createdAt?.toDate
         ? order.createdAt.toDate()
         : order.createdAt?.seconds
-        ? new Date(order.createdAt.seconds * 1000)
-        : new Date();
+          ? new Date(order.createdAt.seconds * 1000)
+          : new Date();
 
       const dateStr = createdAt.toLocaleString("en-PK", {
         day: "2-digit",
@@ -157,189 +112,243 @@ export default function Payments() {
         year: "2-digit",
         hour: "2-digit",
         minute: "2-digit",
+        hour12: true,
       });
 
-      // Customer Info Section
-      pdf.setFontSize(7);
-      pdf.setFont("helvetica", "normal");
-      pdf.text(`Invoice: ${order.orderId || "000"}`, leftPadding, y);
-      y += lineHeight;
-      pdf.text(
-        `Customer: ${order.customerName || order.name || "-"}`,
-        leftPadding,
-        y
-      );
-      y += lineHeight;
-
-      // Address
-      const addr = order.customerAddress || order.address || "-";
-      const addressLines = pdf.splitTextToSize(
-        `Address: ${addr}`,
-        pageWidth - 8
-      );
-      addressLines.forEach((line) => {
-        pdf.text(line, leftPadding, y);
-        y += lineHeight;
-      });
-
-      pdf.text(
-        `Phone: ${order.customerPhone || order.phone || "-"}`,
-        leftPadding,
-        y
-      );
-      y += lineHeight;
-      pdf.text(`Payment: ${order.paymentMethod || "-"}`, leftPadding, y);
-      y += lineHeight;
-      pdf.text(`Type: ${order.deliveryType || "-"}`, leftPadding, y);
-      y += lineHeight;
-      pdf.text(`Time: ${dateStr}`, leftPadding, y);
-      y += lineHeight;
-
-      pdf.line(4, y, pageWidth - 4, y);
-      y += 4;
-
-      // ✅ Items Table Header
-      pdf.setFontSize(7);
-      pdf.setFont("helvetica", "bold");
-      pdf.text("Item", leftPadding, y);
-      pdf.text("Qty", 42, y);
-      pdf.text("Rate", 52, y);
-      pdf.text("Amt", 66, y);
-      y += 3;
-      pdf.line(4, y, pageWidth - 4, y);
-      y += 4;
-
-      // ✅ Items Table Body - Manual rendering for Urdu support
       const items = Array.isArray(order.items) ? order.items : [];
-
-      items.forEach((item) => {
-        const price = num(item?.price);
-        const qty = num(item?.qty);
-        const amount = (price * qty).toFixed(0);
-
-        // Get English and Urdu names
-        const nameEn = item?.nameEn || item?.name || "-";
-        const nameUrdu = item?.nameUrdu || "";
-
-        // ✅ Print English Name
-        pdf.setFont("helvetica", "normal");
-        pdf.setFontSize(7);
-
-        const maxNameWidth = 36;
-        const nameLines = pdf.splitTextToSize(nameEn, maxNameWidth);
-
-        nameLines.forEach((line, idx) => {
-          pdf.text(line, leftPadding, y);
-          // Only show qty, rate, amount on first line
-          if (idx === 0) {
-            pdf.text(String(qty), 42, y);
-            pdf.text(price.toFixed(0), 52, y);
-            pdf.text(amount, 66, y);
-          }
-          y += lineHeight;
-        });
-
-        // ✅ Print Urdu Name (if exists) - RTL
-        if (nameUrdu && nameUrdu.trim() !== "") {
-          try {
-            pdf.setFont("NotoNastaliqUrdu-Bold", "normal");
-            pdf.setFontSize(9);
-            // Right-to-left text - align right
-            pdf.text(nameUrdu, rightPadding - 4, y, { align: "right" });
-            y += lineHeight + 2;
-          } catch (fontError) {
-            console.warn("Urdu font error:", fontError);
-            // Fallback to showing in brackets
-            pdf.setFont("helvetica", "normal");
-            pdf.setFontSize(6);
-            pdf.text(`(${nameUrdu})`, leftPadding, y);
-            y += lineHeight;
-          }
-        }
-
-        y += 1; // Small gap between items
-      });
-
-      pdf.line(4, y, pageWidth - 4, y);
-      y += 5;
-
-      // Totals Section
       const sub = num(order.subtotal ?? order.total ?? 0);
       const del = num(order.deliveryCharge ?? 0);
       const grand = num(order.grandTotal ?? sub + del);
 
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(8);
-      pdf.text(`Subtotal: Rs.${sub.toLocaleString()}`, leftPadding, y);
-      y += lineHeight;
-      pdf.text(`Delivery: Rs.${del.toLocaleString()}`, leftPadding, y);
-      y += lineHeight;
-      pdf.setFontSize(9);
-      pdf.text(`TOTAL: Rs.${grand.toLocaleString()}`, leftPadding, y);
-      y += 8;
-
-      // Barcode
+      // ── Barcode Generation ──
+      let barcodeDataUrl = "";
       try {
-        const canvas = document.createElement("canvas");
-        JsBarcode(canvas, order.orderId || "000", {
+        const bCanvas = document.createElement("canvas");
+        JsBarcode(bCanvas, order.orderId || "000", {
           format: "CODE128",
-          width: 1,
-          height: 18,
+          width: 2,
+          height: 50,
           displayValue: false,
+          background: "#ffffff",
+          lineColor: "#000000",
+          margin: 0,
         });
-        pdf.addImage(
-          canvas.toDataURL("image/png"),
-          "PNG",
-          (pageWidth - 36) / 2,
-          y,
-          36,
-          9
-        );
-        y += 12;
-      } catch (barcodeError) {
-        console.warn("Barcode generation error:", barcodeError);
-        y += 5;
+        barcodeDataUrl = bCanvas.toDataURL("image/png");
+      } catch (e) {
+        console.warn("Barcode error:", e);
       }
 
-      // Footer
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(6);
-      const footerText =
-        "Please check your order before leaving. No return without receipt.";
-      pdf.text(footerText, pageWidth / 2, y, {
-        align: "center",
-        maxWidth: pageWidth - 10,
-      });
-      y += 8;
+      // ── Items Rows ──
+      const itemsRowsHTML = items
+        .map((item) => {
+          const price = num(item?.price || 0);
+          const qty = num(item?.qty || 0);
+          const itemName = item?.nameEn || item?.nameUrdu || item?.name || "-";
 
-      pdf.setFontSize(7);
-      pdf.text("Thanks for shopping with us!", pageWidth / 2, y, {
-        align: "center",
-      });
-      y += 4;
-      pdf.text("Visit Again!", pageWidth / 2, y, { align: "center" });
+          return `
+            <tr style="border-bottom: 1px dashed #ccc;">
+              <td class="urdu-text" style="
+                padding: 4px 0;
+                vertical-align: top;
+                font-size: 14px;
+                color: #000;
+                width: 75%;
+                line-height: 1.4;
+              ">
+                ${itemName}
+              </td>
+              <td style="
+                padding: 4px 0;
+                text-align: right;
+                vertical-align: top;
+                font-size: 10px;
+                color: #000;
+                width: 8%;
+              ">${qty}</td>
+              <td style="
+                padding: 4px 0;
+                text-align: right;
+                vertical-align: top;
+                font-size: 10px;
+                color: #000;
+                width: 17%;
+              ">${price.toLocaleString()}</td>
+            </tr>`;
+        })
+        .join("");
 
-      pdf.save(`Invoice_${order.orderId || "000"}.pdf`);
+      // ── Invoice HTML ──
+      const invoiceHTML = `
+        <div style="width: 280px; padding: 10px; background: #ffffff; color: #000000; font-family: Arial, sans-serif; box-sizing: border-box; margin: 0 auto;">
+          
+          <!-- STORE HEADER -->
+          <div style="text-align: center; padding-bottom: 10px;">
+            <div style="font-size: 18px; font-weight: bold; letter-spacing: 0.5px; margin: 0 0 5px 0; text-transform: uppercase;">
+              ANSARI TRADERS
+            </div>
+            <div style="font-size: 11px; color: #222; margin: 3px 0;">Korangi, Karachi - Pakistan</div>
+            <div style="font-size: 11px; color: #222; margin: 3px 0;">Phone: 0213-5041666</div>
+            <div style="font-size: 15px; font-weight: bold; margin-top: 8px;">SALE RECEIPT</div>
+          </div>
+
+          <!-- DIVIDER -->
+          <div style="border-top: 1px solid #000; margin: 8px 0;"></div>
+
+          <!-- ORDER DETAILS -->
+          <div style="font-size: 11px; color: #000; line-height: 1.6; text-align: left;">
+            <div>Invoice: ${order.orderId || "000"}</div>
+            <div>Customer: ${order.customerName || "-"}</div>
+            ${order.customerAddress ? `<div>Address: ${order.customerAddress}</div>` : ""}
+            <div>Phone: ${order.customerPhone || "-"}</div>
+            <div>Payment: ${order.paymentMethod || "-"}</div>
+            <div>Type: ${order.deliveryType || "-"}</div>
+            <div>Time: ${dateStr}</div>
+          </div>
+
+          <!-- DIVIDER -->
+          <div style="border-top: 1px solid #000; margin: 8px 0;"></div>
+
+          <!-- ITEMS TABLE -->
+          <table style="width: 100%; border-collapse: collapse; margin-bottom: 10px;">
+            <thead>
+              <tr style="border-bottom: 1px solid #000;">
+                <th style="padding: 4px 0; text-align: left; font-size: 11px; font-weight: bold; width: 75%;">Item</th>
+                <th style="padding: 4px 0; text-align: right; font-size: 11px; font-weight: bold; width: 8%;">Qty</th>
+                <th style="padding: 4px 0; text-align: right; font-size: 11px; font-weight: bold; width: 17%;">Rate</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${itemsRowsHTML}
+            </tbody>
+          </table>
+
+          <!-- TOTALS -->
+          <div style="margin-top: 10px;">
+            <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+              <tbody>
+                <tr>
+                  <td style="padding: 3px 0; text-align: right; width: 70%;">Subtotal:</td>
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${sub.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 3px 0; text-align: right;">Delivery:</td>
+                  <td style="padding: 3px 0; text-align: right; font-weight: bold;">${del.toLocaleString()}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 5px 0; text-align: right; font-size: 13px; font-weight: bold; border-top: 1px solid #000;">Grand Total:</td>
+                  <td style="padding: 5px 0; text-align: right; font-size: 13px; font-weight: bold; border-top: 1px solid #000;">${grand.toLocaleString()}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- BARCODE -->
+          ${barcodeDataUrl
+          ? `
+          <div style="text-align: center; margin-top: 15px;">
+            <img src="${barcodeDataUrl}" style="height: 35px; max-width: 100%; display: block; margin: 0 auto;" />
+            <div style="font-size: 9px; color: #000; letter-spacing: 1px; margin-top: 4px;">${order.orderId || "000"}</div>
+          </div>`
+          : ""
+        }
+
+          <!-- FOOTER -->
+          <div style="text-align: center; margin-top: 15px;">
+            <div style="font-size: 10px; color: #000;">Thank you for shopping with us!</div>
+          </div>
+        </div>
+      `;
+
+      const printWindow = window.open("", "", "height=900,width=800");
+      printWindow.document.write("<html><head><title>Invoice</title>");
+      printWindow.document.write(
+        "<link href='https://fonts.googleapis.com/css2?family=Noto+Nastaliq+Urdu:wght@400;700&display=swap' rel='stylesheet'>"
+      );
+      printWindow.document.write("<style>");
+      printWindow.document.write(
+        "body { font-family: Arial, sans-serif; margin: 0; padding: 15px; }"
+      );
+      printWindow.document.write(
+        ".urdu-text { font-family: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', serif; direction: rtl; unicode-bidi: embed; text-align: right; display: block; }"
+      );
+      printWindow.document.write("</style>");
+      printWindow.document.write("</head><body>");
+      printWindow.document.write(invoiceHTML);
+      printWindow.document.write("</body></html>");
+      printWindow.document.close();
+
+      // Wait for fonts to load before printing
+      setTimeout(() => {
+        printWindow.print();
+      }, 500);
+
     } catch (err) {
-      console.error("Error generating invoice:", err);
-      alert("Invoice generation failed: " + err.message);
+      console.error("Invoice error:", err);
+      alert("Invoice error: " + err.message);
+    } finally {
+      setInvoiceLoading(null);
     }
   };
 
   return (
-    <div className="p-6 bg-gradient-to-br from-blue-50 to-blue-100 rounded-2xl shadow-xl w-full max-w-7xl mx-auto overflow-auto border border-blue-200 backdrop-blur-md">
-      <h2 className="text-3xl font-bold text-blue-700 mb-6 text-center">
-        Orders & Payments
-      </h2>
+    <div className="p-6 bg-gradient-to-br from-slate-50 to-blue-50 rounded-2xl shadow-2xl w-full max-w-7xl mx-auto overflow-auto border border-blue-200">
 
-      {/* Search + Filter */}
-      <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
-        <div className="flex items-center gap-2 bg-white p-2 rounded-lg shadow-sm">
-          <FaSearch className="text-gray-500" />
+      {/* ── Page Title ── */}
+      <div className="text-center mb-8">
+        <h2 className="text-4xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-700 to-indigo-700 tracking-tight">
+          Orders & Payments
+        </h2>
+        <p className="text-gray-500 text-sm mt-1">
+          Manage all customer orders and invoices
+        </p>
+      </div>
+
+      {/* ── Stats Bar ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
+        {[
+          {
+            label: "Total Orders",
+            value: orders.length,
+            color: "from-blue-500 to-blue-600",
+          },
+          {
+            label: "Pending",
+            value: orders.filter(
+              (o) => (o.status || "Pending") === "Pending"
+            ).length,
+            color: "from-yellow-400 to-yellow-500",
+          },
+          {
+            label: "Paid",
+            value: orders.filter((o) => o.status === "Paid").length,
+            color: "from-green-500 to-green-600",
+          },
+          {
+            label: "Delivered",
+            value: orders.filter((o) => o.status === "Delivered").length,
+            color: "from-indigo-500 to-indigo-600",
+          },
+        ].map((s) => (
+          <div
+            key={s.label}
+            className={`bg-gradient-to-br ${s.color} text-white rounded-xl p-4 shadow-md`}
+          >
+            <div className="text-2xl font-black">{s.value}</div>
+            <div className="text-xs font-semibold opacity-90 mt-1">
+              {s.label}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Search + Filter ── */}
+      <div className="flex flex-wrap gap-3 items-center justify-between mb-5">
+        <div className="flex items-center gap-2 bg-white border border-gray-200 px-3 py-2 rounded-xl shadow-sm flex-1 min-w-[240px]">
+          <FaSearch className="text-gray-400 shrink-0" />
           <input
             type="text"
-            placeholder="Search by name, phone, email, or order ID..."
-            className="outline-none bg-transparent w-64"
+            placeholder="Search by name, phone, email, order ID..."
+            className="outline-none bg-transparent text-sm w-full text-gray-700"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
@@ -348,42 +357,60 @@ export default function Payments() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="p-2 border rounded-lg shadow-sm bg-white"
+          className="px-4 py-2 border border-gray-200 rounded-xl shadow-sm bg-white text-sm font-semibold text-gray-700 cursor-pointer"
         >
-          <option value="All">All</option>
+          <option value="All">All Status</option>
           <option value="Pending">Pending</option>
           <option value="Paid">Paid</option>
           <option value="Delivered">Delivered</option>
         </select>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       {loading ? (
-        <div className="text-center text-gray-600 py-10 text-lg animate-pulse">
-          Loading payments...
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          <p className="text-gray-500 text-sm animate-pulse">
+            Loading orders...
+          </p>
         </div>
       ) : (
         <>
-          <div className="overflow-x-auto rounded-xl shadow-lg">
+          <div className="overflow-x-auto rounded-2xl shadow-lg border border-gray-100">
             <table className="w-full text-sm text-left text-gray-800">
-              <thead className="bg-blue-200/70 text-blue-900 font-semibold">
-                <tr>
-                  <th className="p-3">Order ID</th>
-                  <th className="p-3">Customer</th>
-                  <th className="p-3">Phone</th>
-                  <th className="p-3">Total</th>
-                  <th className="p-3">Method</th>
-                  <th className="p-3">Type</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Date</th>
-                  <th className="p-3 text-center">Actions</th>
+              <thead>
+                <tr className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white">
+                  {[
+                    "Order ID",
+                    "Customer",
+                    "Phone",
+                    "Total",
+                    "Method",
+                    "Type",
+                    "Status",
+                    "Date",
+                    "Actions",
+                  ].map((h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 font-semibold text-xs uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {h}
+                    </th>
+                  ))}
                 </tr>
               </thead>
-              <tbody className="bg-white">
+              <tbody className="bg-white divide-y divide-gray-100">
                 {current.length === 0 ? (
                   <tr>
-                    <td colSpan="9" className="text-center p-6 text-gray-500">
-                      No orders found.
+                    <td
+                      colSpan="9"
+                      className="text-center py-16 text-gray-400"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <span className="text-4xl">📭</span>
+                        <span className="font-medium">No orders found</span>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -391,72 +418,100 @@ export default function Payments() {
                     const createdAt = o.createdAt?.toDate
                       ? o.createdAt.toDate()
                       : o.createdAt?.seconds
-                      ? new Date(o.createdAt.seconds * 1000)
-                      : null;
+                        ? new Date(o.createdAt.seconds * 1000)
+                        : null;
+
                     const date = createdAt
                       ? createdAt.toLocaleString("en-PK", {
-                          day: "2-digit",
-                          month: "short",
-                          year: "numeric",
-                        })
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
                       : "—";
 
                     const sub = num(o.subtotal ?? o.total ?? 0);
                     const del = num(o.deliveryCharge ?? 0);
                     const grand = num(o.grandTotal ?? sub + del);
 
+                    const statusStyles = {
+                      Paid: "bg-green-100 text-green-800 border-green-200",
+                      Delivered:
+                        "bg-blue-100 text-blue-800 border-blue-200",
+                      Pending:
+                        "bg-yellow-100 text-yellow-800 border-yellow-200",
+                    };
+                    const st = o.status || "Pending";
+
                     return (
                       <tr
                         key={o.id}
-                        className="border-t border-blue-100 hover:bg-blue-50/70 transition"
+                        className="hover:bg-blue-50/60 transition-colors duration-150"
                       >
-                        <td className="p-3 font-semibold text-gray-800">
-                          {o.orderId || `ORD-${String(i + 1).padStart(3, "0")}`}
+                        <td className="px-4 py-3 font-bold text-gray-900 whitespace-nowrap">
+                          {o.orderId ||
+                            `ORD-${String(i + 1).padStart(3, "0")}`}
                         </td>
-                        <td className="p-3">
+                        <td className="px-4 py-3 font-medium whitespace-nowrap">
                           {o.customerName || o.name || "—"}
                         </td>
-                        <td className="p-3">
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                           {o.customerPhone || o.phone || "—"}
                         </td>
-                        <td className="p-3 font-semibold text-green-700">
-                          Rs.{grand.toLocaleString()}
+                        <td className="px-4 py-3 font-bold text-green-700 whitespace-nowrap">
+                          Rs. {grand.toLocaleString()}
                         </td>
-                        <td className="p-3">{o.paymentMethod || "—"}</td>
-                        <td className="p-3">{o.deliveryType || "-"}</td>
-                        <td className="p-3">
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                          {o.paymentMethod || "—"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                          {o.deliveryType || "—"}
+                        </td>
+                        <td className="px-4 py-3">
                           <select
-                            value={o.status || "Pending"}
+                            value={st}
                             onChange={(e) =>
                               handleStatusChange(o.id, e.target.value)
                             }
-                            className={`border px-2 py-1 rounded text-sm font-semibold ${
-                              o.status === "Paid"
-                                ? "bg-green-100 text-green-800"
-                                : o.status === "Delivered"
-                                ? "bg-blue-100 text-blue-800"
-                                : "bg-yellow-100 text-yellow-800"
-                            }`}
+                            className={`border px-2 py-1 rounded-lg text-xs font-bold cursor-pointer ${statusStyles[st] || statusStyles["Pending"]
+                              }`}
                           >
                             <option value="Pending">Pending</option>
                             <option value="Paid">Paid</option>
                             <option value="Delivered">Delivered</option>
                           </select>
                         </td>
-                        <td className="p-3">{date}</td>
-                        <td className="p-3 text-center flex gap-2 justify-center">
-                          <button
-                            onClick={() => handleInvoice(o)}
-                            className="px-3 py-1 text-sm bg-green-500 hover:bg-green-600 text-white rounded-lg shadow-sm flex items-center gap-1"
-                          >
-                            <FaFileInvoice /> Invoice
-                          </button>
-                          <button
-                            onClick={() => handleDelete(o.id)}
-                            className="px-3 py-1 text-sm bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-sm flex items-center gap-1"
-                          >
-                            <FaTrash /> Delete
-                          </button>
+                        <td className="px-4 py-3 text-gray-500 whitespace-nowrap text-xs">
+                          {date}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex gap-2 items-center">
+                            <button
+                              onClick={() => handleInvoice(o)}
+                              disabled={invoiceLoading === o.id}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white rounded-lg shadow-sm transition-all"
+                            >
+                              {invoiceLoading === o.id ? (
+                                <>
+                                  <span className="inline-block animate-spin">
+                                    ⏳
+                                  </span>
+                                  Wait...
+                                </>
+                              ) : (
+                                <>
+                                  <FaFileInvoice />
+                                  Invoice
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(o.id)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-red-500 hover:bg-red-600 text-white rounded-lg shadow-sm transition-all"
+                            >
+                              <FaTrash />
+                              Delete
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -466,26 +521,46 @@ export default function Payments() {
             </table>
           </div>
 
-          {/* Pagination */}
-          <div className="flex justify-center mt-4 gap-2">
+          {/* ── Pagination ── */}
+          <div className="flex justify-center items-center mt-5 gap-2">
             <button
               onClick={() => setPage((p) => Math.max(p - 1, 1))}
               disabled={page === 1}
-              className="px-3 py-1 bg-blue-500 text-white rounded disabled:opacity-40"
+              className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg disabled:opacity-40 hover:bg-blue-700 transition"
             >
-              Prev
+              ← Prev
             </button>
-            <span className="px-3 py-1 font-semibold">
-              Page {page} of {totalPages}
-            </span>
+            <div className="flex gap-1">
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, idx) => {
+                const p = idx + 1;
+                return (
+                  <button
+                    key={p}
+                    onClick={() => setPage(p)}
+                    className={`w-9 h-9 text-sm font-bold rounded-lg transition ${page === p
+                      ? "bg-blue-600 text-white shadow"
+                      : "bg-white text-gray-700 border border-gray-200 hover:bg-blue-50"
+                      }`}
+                  >
+                    {p}
+                  </button>
+                );
+              })}
+            </div>
             <button
               onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
               disabled={page === totalPages}
-              className="px-3 py-1 bg-blue-500 text-white rounded disabled:opacity-40"
+              className="px-4 py-2 text-sm font-semibold bg-blue-600 text-white rounded-lg disabled:opacity-40 hover:bg-blue-700 transition"
             >
-              Next
+              Next →
             </button>
           </div>
+
+          <p className="text-center text-xs text-gray-400 mt-2">
+            Showing {(page - 1) * perPage + 1}–
+            {Math.min(page * perPage, filtered.length)} of {filtered.length}{" "}
+            orders
+          </p>
         </>
       )}
     </div>

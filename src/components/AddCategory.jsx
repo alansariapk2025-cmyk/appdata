@@ -25,6 +25,7 @@ export default function AddCategory() {
   // ✅ New fields
   const [isPopular, setIsPopular] = useState(false);
   const [isReselling, setIsReselling] = useState(false);
+  const [isActive, setIsActive] = useState(true); // Enable/Disable Category
 
   const [expandedCategoryId, setExpandedCategoryId] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -100,6 +101,7 @@ export default function AddCategory() {
         parentId: parentForNew || null,
         isPopular,
         isReselling,
+        isActive,
         updatedAt: Timestamp.now(),
       };
 
@@ -132,6 +134,7 @@ export default function AddCategory() {
     setEditingCat(null);
     setIsPopular(false);
     setIsReselling(false);
+    setIsActive(true);
   };
 
   // 🔹 Edit Category
@@ -141,6 +144,7 @@ export default function AddCategory() {
     setParentForNew(cat.parentId || "");
     setIsPopular(!!cat.isPopular);
     setIsReselling(!!cat.isReselling);
+    setIsActive(cat.isActive !== false); // Default to true if undefined
     setCatImageFile(null);
   };
 
@@ -222,7 +226,7 @@ export default function AddCategory() {
         </div>
 
         {/* 🔹 Checkboxes */}
-        <div className="flex gap-6 md:col-span-3">
+        <div className="flex gap-6 md:col-span-3 flex-wrap">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={isPopular} onChange={(e) => setIsPopular(e.target.checked)} />
             🏆 Most Popular
@@ -231,6 +235,11 @@ export default function AddCategory() {
           <label className="flex items-center gap-2 text-sm font-medium">
             <input type="checkbox" checked={isReselling} onChange={(e) => setIsReselling(e.target.checked)} />
             🔁 Reselling
+          </label>
+
+          <label className="flex items-center gap-2 text-sm font-medium text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200 cursor-pointer">
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} className="cursor-pointer" />
+            {isActive ? "✅ Active" : "❌ Disabled"}
           </label>
         </div>
 
@@ -265,10 +274,11 @@ export default function AddCategory() {
                 <div className="flex items-center gap-4">
                   {main.image && <img src={main.image} className="w-12 h-12 rounded-lg object-cover" />}
                   <div>
-                    <div className="font-medium text-gray-900 flex gap-2 items-center">
+                    <div className="font-medium text-gray-900 flex gap-2 items-center flex-wrap">
                       {main.name}
                       {main.isPopular && <span className="text-xs bg-yellow-400 text-black px-2 py-0.5 rounded">🏆 Popular</span>}
                       {main.isReselling && <span className="text-xs bg-green-400 text-black px-2 py-0.5 rounded">🔁 Reselling</span>}
+                      {main.isActive === false && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold border border-red-300">❌ Disabled</span>}
                     </div>
                     <div className="text-xs text-gray-600">Main Category</div>
                   </div>
@@ -290,10 +300,11 @@ export default function AddCategory() {
                     <div key={sub.id} className="flex justify-between items-center bg-white/10 p-3 rounded-lg">
                       <div className="flex items-center gap-3">
                         {sub.image && <img src={sub.image} className="w-10 h-10 rounded-md object-cover" />}
-                        <div className="font-medium flex gap-2 items-center">
+                        <div className="font-medium flex gap-2 items-center flex-wrap">
                           {sub.name}
                           {sub.isPopular && <span className="text-xs bg-yellow-400 text-black px-2 rounded">🏆</span>}
                           {sub.isReselling && <span className="text-xs bg-green-400 text-black px-2 rounded">🔁</span>}
+                          {sub.isActive === false && <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded font-bold border border-red-300">Disabled</span>}
                         </div>
                       </div>
                       <div className="flex gap-3">
