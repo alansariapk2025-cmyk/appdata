@@ -26,9 +26,9 @@ const num = (v) => (typeof v === "number" && !isNaN(v) ? v : Number(v) || 0);
 
 // ── Default Print Settings ──
 const DEFAULT_SETTINGS = {
-  paperWidth: 80,           // mm (58, 72, 80, 100)
-  paperHeight: "auto",      // auto or number in mm
-  margin: 3,                // mm
+  paperWidth: 80,
+  paperHeight: "auto",
+  margin: 3,
   fontFamily: "Arial",
   storeNameSize: 18,
   headerInfoSize: 11,
@@ -40,9 +40,11 @@ const DEFAULT_SETTINGS = {
   totalsSize: 12,
   grandTotalSize: 14,
   footerSize: 10,
-  itemColWidth: 50,         // %
-  qtyColWidth: 15,          // %
-  rateColWidth: 35,         // %
+  // ── UPDATED: 4 columns instead of 3 ──
+  itemColWidth: 36,
+  qtyColWidth: 14,
+  rateColWidth: 22,
+  amountColWidth: 28,
   showBarcode: true,
   barcodeHeight: 35,
   storeName: "ANSARI TRADERS",
@@ -58,7 +60,6 @@ const DEFAULT_SETTINGS = {
 
 const STORAGE_KEY = "invoice_print_settings_v1";
 
-// ── Settings Helpers ──
 const loadSettings = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -139,7 +140,6 @@ export default function Payments() {
 
   useEffect(() => setPage(1), [statusFilter, searchTerm]);
 
-  // ── Delete Order ──
   const handleDelete = async (id) => {
     if (!window.confirm("Are you sure you want to delete this order?")) return;
     try {
@@ -149,7 +149,6 @@ export default function Payments() {
     }
   };
 
-  // ── Update Status ──
   const handleStatusChange = async (id, status) => {
     try {
       await updateDoc(doc(db, "orders", id), {
@@ -161,7 +160,6 @@ export default function Payments() {
     }
   };
 
-  // ── Save Settings ──
   const handleSaveSettings = () => {
     if (saveSettings(printSettings)) {
       alert("✅ Settings saved successfully!");
@@ -229,21 +227,23 @@ export default function Payments() {
           }
         }
 
-        // ── Items Rows ──
+        // ══════════════════════════════════════════════
+        // ── FIXED: 4 columns - Item | Qty | Rate | Amount ──
+        // ══════════════════════════════════════════════
         const itemsRowsHTML = items
           .map((item) => {
             const price = num(item?.price || 0);
             const qty = num(item?.qty || 0);
+            const lineTotal = price * qty;
             const itemName =
               item?.nameEn || item?.nameUrdu || item?.name || "-";
             const isUrduItem = !!item?.nameUrdu;
             const itemAlign = isUrduItem ? "right" : "left";
             const itemDirection = isUrduItem ? "rtl" : "ltr";
-            const lineTotal = price * qty;
 
             return `
               <tr>
-                <td class="item-cell" style="
+                <td style="
                   vertical-align: top;
                   font-size: ${s.itemNameSize}px;
                   color: ${s.textColor};
@@ -251,13 +251,11 @@ export default function Payments() {
                   line-height: ${s.lineSpacing};
                   direction: ${itemDirection};
                   text-align: ${itemAlign};
-                  padding: 3px 2px;
+                  padding: 3px 4px 3px 8px;
                   word-wrap: break-word;
                   word-break: break-word;
-                ">
-                  ${itemName}
-                </td>
-                <td class="qty-cell" style="
+                ">${itemName}</td>
+                <td style="
                   text-align: center;
                   vertical-align: top;
                   font-size: ${s.qtyRateSize}px;
@@ -266,20 +264,29 @@ export default function Payments() {
                   padding: 3px 2px;
                   white-space: nowrap;
                 ">${qty}</td>
-                <td class="rate-cell" style="
+                <td style="
                   text-align: right;
                   vertical-align: top;
                   font-size: ${s.qtyRateSize}px;
                   color: ${s.textColor};
                   width: ${s.rateColWidth}%;
-                  padding: 3px 2px;
+                  padding: 3px 4px;
+                  white-space: nowrap;
+                ">${price.toLocaleString()}</td>
+                <td style="
+                  text-align: right;
+                  vertical-align: top;
+                  font-size: ${s.qtyRateSize}px;
+                  color: ${s.textColor};
+                  font-weight: bold;
+                  width: ${s.amountColWidth}%;
+                  padding: 3px 8px 3px 2px;
                   white-space: nowrap;
                 ">${lineTotal.toLocaleString()}</td>
               </tr>`;
           })
           .join("");
 
-        // ── Page Settings ──
         const paperHeight =
           s.paperHeight === "auto" ? "auto" : `${s.paperHeight}mm`;
         const pageStyle = `@page { size: ${s.paperWidth}mm ${paperHeight}; margin: ${s.margin}mm; }`;
@@ -337,7 +344,9 @@ export default function Payments() {
 
             <div style="border-top: 1px dashed ${s.textColor}; margin: 6px 0;"></div>
 
-            <!-- ITEMS TABLE -->
+            <!-- ═══════════════════════════════════════ -->
+            <!-- ITEMS TABLE - 4 COLUMNS: Item|Qty|Rate|Amount -->
+            <!-- ═══════════════════════════════════════ -->
             <table style="
               width: 100%;
               border-collapse: collapse;
@@ -347,7 +356,7 @@ export default function Payments() {
               <thead>
                 <tr style="border-bottom: 1px solid ${s.textColor};">
                   <th style="
-                    padding: 4px 2px;
+                    padding: 4px 4px 4px 8px;
                     text-align: left;
                     font-size: ${s.tableHeaderSize}px;
                     font-weight: bold;
@@ -361,12 +370,19 @@ export default function Payments() {
                     width: ${s.qtyColWidth}%;
                   ">Qty</th>
                   <th style="
-                    padding: 4px 2px;
+                    padding: 4px 4px;
                     text-align: right;
                     font-size: ${s.tableHeaderSize}px;
                     font-weight: bold;
                     width: ${s.rateColWidth}%;
-                  ">Total</th>
+                  ">Rate</th>
+                  <th style="
+                    padding: 4px 8px 4px 2px;
+                    text-align: right;
+                    font-size: ${s.tableHeaderSize}px;
+                    font-weight: bold;
+                    width: ${s.amountColWidth}%;
+                  ">Amount</th>
                 </tr>
               </thead>
               <tbody>${itemsRowsHTML}</tbody>
@@ -378,30 +394,30 @@ export default function Payments() {
             <table style="width: 100%; font-size: ${s.totalsSize}px; border-collapse: collapse;">
               <tbody>
                 <tr>
-                  <td style="padding: 3px 2px; text-align: right; width: 60%;">Subtotal:</td>
-                  <td style="padding: 3px 2px; text-align: right; font-weight: bold; white-space: nowrap;">
+                  <td style="padding: 6px 12px; text-align: right; width: 60%;">Subtotal:</td>
+                  <td style="padding: 6px 12px; text-align: right; font-weight: bold; white-space: nowrap;">
                     Rs. ${sub.toLocaleString()}
                   </td>
                 </tr>
                 ${del > 0
             ? `<tr>
-                  <td style="padding: 3px 2px; text-align: right;">Delivery:</td>
-                  <td style="padding: 3px 2px; text-align: right; font-weight: bold; white-space: nowrap;">
-                    Rs. ${del.toLocaleString()}
-                  </td>
-                </tr>`
+                      <td style="padding: 6px 12px; text-align: right;">Delivery:</td>
+                      <td style="padding: 6px 12px; text-align: right; font-weight: bold; white-space: nowrap;">
+                        Rs. ${del.toLocaleString()}
+                      </td>
+                    </tr>`
             : ""
           }
                 <tr>
                   <td style="
-                    padding: 5px 2px;
+                    padding: 8px 12px;
                     text-align: right;
                     font-size: ${s.grandTotalSize}px;
                     font-weight: bold;
                     border-top: 2px solid ${s.textColor};
                   ">Grand Total:</td>
                   <td style="
-                    padding: 5px 2px;
+                    padding: 8px 12px;
                     text-align: right;
                     font-size: ${s.grandTotalSize}px;
                     font-weight: bold;
@@ -414,9 +430,9 @@ export default function Payments() {
 
             ${barcodeDataUrl
             ? `<div style="text-align: center; margin-top: 12px;">
-                <img src="${barcodeDataUrl}" style="height: ${s.barcodeHeight}px; max-width: 100%; display: block; margin: 0 auto;" />
-                <div style="font-size: 9px; color: ${s.textColor}; letter-spacing: 1px; margin-top: 3px;">${order.orderId || "000"}</div>
-              </div>`
+                  <img src="${barcodeDataUrl}" style="height: ${s.barcodeHeight}px; max-width: 100%; display: block; margin: 0 auto;" />
+                  <div style="font-size: 9px; color: ${s.textColor}; letter-spacing: 1px; margin-top: 3px;">${order.orderId || "000"}</div>
+                </div>`
             : ""
           }
 
@@ -447,8 +463,6 @@ export default function Payments() {
                 print-color-adjust: exact;
               }
               table { border-collapse: collapse; }
-              .item-cell { word-break: break-word; white-space: normal; }
-              .qty-cell, .rate-cell { white-space: nowrap; }
               @media print {
                 body { width: ${s.paperWidth}mm; }
                 .invoice-container { page-break-inside: avoid; }
@@ -675,8 +689,8 @@ export default function Payments() {
                     key={p}
                     onClick={() => setPage(p)}
                     className={`w-9 h-9 text-sm font-bold rounded-lg transition ${page === p
-                        ? "bg-blue-600 text-white shadow"
-                        : "bg-white text-gray-700 border border-gray-200 hover:bg-blue-50"
+                      ? "bg-blue-600 text-white shadow"
+                      : "bg-white text-gray-700 border border-gray-200 hover:bg-blue-50"
                       }`}
                   >
                     {p}
@@ -701,7 +715,7 @@ export default function Payments() {
       )}
 
       {/* ═══════════════════════════════════════════ */}
-      {/* ── PRINT SETTINGS MODAL (Admin Panel) ── */}
+      {/* ── PRINT SETTINGS MODAL ── */}
       {/* ═══════════════════════════════════════════ */}
       {showSettings && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
@@ -817,13 +831,15 @@ export default function Payments() {
                 </Field>
               </Section>
 
-              {/* ── Column Widths Section ── */}
-              <Section title="📊 Table Column Widths (%)">
+              {/* ═══════════════════════════════════════ */}
+              {/* ── UPDATED: 4 Column Widths Section ── */}
+              {/* ═══════════════════════════════════════ */}
+              <Section title="📊 Table Column Widths (%) — Item | Qty | Rate | Amount">
                 <Field label={`Item Column: ${printSettings.itemColWidth}%`}>
                   <input
                     type="range"
-                    min="30"
-                    max="70"
+                    min="25"
+                    max="50"
                     value={printSettings.itemColWidth}
                     onChange={(e) => updateSetting("itemColWidth", Number(e.target.value))}
                     className="w-full"
@@ -832,25 +848,41 @@ export default function Payments() {
                 <Field label={`Qty Column: ${printSettings.qtyColWidth}%`}>
                   <input
                     type="range"
-                    min="10"
-                    max="25"
+                    min="8"
+                    max="20"
                     value={printSettings.qtyColWidth}
                     onChange={(e) => updateSetting("qtyColWidth", Number(e.target.value))}
                     className="w-full"
                   />
                 </Field>
-                <Field label={`Total Column: ${printSettings.rateColWidth}%`}>
+                <Field label={`Rate Column: ${printSettings.rateColWidth}%`}>
                   <input
                     type="range"
-                    min="20"
-                    max="45"
+                    min="15"
+                    max="30"
                     value={printSettings.rateColWidth}
                     onChange={(e) => updateSetting("rateColWidth", Number(e.target.value))}
                     className="w-full"
                   />
                 </Field>
-                <div className="col-span-full text-xs text-gray-500 bg-yellow-50 p-2 rounded">
-                  💡 Total: {printSettings.itemColWidth + printSettings.qtyColWidth + printSettings.rateColWidth}% (should be 100%)
+                <Field label={`Amount Column: ${printSettings.amountColWidth}%`}>
+                  <input
+                    type="range"
+                    min="18"
+                    max="35"
+                    value={printSettings.amountColWidth}
+                    onChange={(e) => updateSetting("amountColWidth", Number(e.target.value))}
+                    className="w-full"
+                  />
+                </Field>
+                <div className="col-span-full text-xs text-gray-500 bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                  <strong>💡 Column Total:</strong>{" "}
+                  {printSettings.itemColWidth + printSettings.qtyColWidth + printSettings.rateColWidth + printSettings.amountColWidth}%
+                  {" "}
+                  {(printSettings.itemColWidth + printSettings.qtyColWidth + printSettings.rateColWidth + printSettings.amountColWidth) === 100
+                    ? <span className="text-green-600 font-bold">✅ Perfect!</span>
+                    : <span className="text-red-600 font-bold">⚠️ Should be 100%</span>
+                  }
                 </div>
               </Section>
 
@@ -974,7 +1006,6 @@ export default function Payments() {
         </div>
       )}
 
-      {/* ── Inline Styles for Custom Classes ── */}
       <style>{`
         .input {
           width: 100%;

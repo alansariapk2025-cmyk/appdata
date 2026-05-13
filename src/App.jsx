@@ -9,7 +9,8 @@ import Header from "./components/layout/Header";
 import Dashboard from "./components/dashboard/Dashboard";
 import AddProduct from "./components/AddProduct";
 import ProductList from "./components/ProductList";
-import PriceManagement from "./components/PriceManagement"; // ✅ NEW
+import PriceManagement from "./components/PriceManagement";
+import FlashDealsManager from "./components/FlashDealsManager"; // ✅ NEW
 import AddCategory from "./components/AddCategory";
 import AddShop from "./components/layout/AddShop";
 import Orders from "./components/Orders";
@@ -107,7 +108,8 @@ export default function App() {
       case "dashboard": return <Dashboard />;
       case "product": return <AddProduct />;
       case "productList": return <ProductList />;
-      case "priceManagement": return <PriceManagement />; // ✅ NEW
+      case "priceManagement": return <PriceManagement />;
+      case "flashDeals": return <FlashDealsManager />; // ✅ NEW
       case "category": return <AddCategory />;
       case "shop": return <AddShop />;
       case "orders": return <Orders onNavigate={setActiveTab} />;

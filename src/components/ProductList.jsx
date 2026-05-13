@@ -482,11 +482,11 @@ export default function ProductList() {
             <tbody>
               {paginated.length === 0 ? <tr><td colSpan={9} className="p-8 text-center text-gray-500"><FaBox className="w-12 h-12 mx-auto mb-2 text-gray-300" />No products found</td></tr>
                 : paginated.map((p, i) => <tr key={p.id} className={`border-b hover:bg-blue-50/50 ${selectedProducts.includes(p.id) ? "bg-blue-50" : i % 2 ? "bg-gray-50/50" : ""} ${updatingStatus === p.id ? "animate-pulse bg-yellow-50" : ""}`}>
-                  <td className="p-3"><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => setSelectedProducts(s => s.includes(p.id) ? s.filter(x => x !== p.id) : [...s, p.id])} /></td>
-                  <td className="p-3">{p.image ? <img src={p.image} alt="" className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:scale-110 transition" onClick={() => setFullImage(p.image)} /> : <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center"><FaImage className="w-5 h-5 text-gray-400" /></div>}</td>
-                  <td className="p-3"><p className="font-semibold">{p.nameEn || "Unnamed"}</p>{p.nameUr && <p className="text-xs text-gray-500">{p.nameUr}</p>}</td>
-                  <td className="p-3 text-gray-600">{p.categoryName || "-"}</td>
-                  <td className="p-3">
+<td className="p-3"><input type="checkbox" checked={selectedProducts.includes(p.id)} onChange={() => setSelectedProducts(s => s.includes(p.id) ? s.filter(x => x !== p.id) : [...s, p.id])} /></td>
+                   <td className="p-3">{p.image ? <img src={p.image} alt="" className="w-12 h-12 rounded-lg object-cover cursor-pointer hover:scale-110 transition" onClick={() => setFullImage(p.image)} /> : <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center"><FaImage className="w-5 h-5 text-gray-400" /></div>}</td>
+                   <td className="px-4 py-3"><p className="font-semibold">{p.nameEn || "Unnamed"}</p>{p.nameUr && <p className="text-xs text-gray-500">{p.nameUr}</p>}</td>
+                   <td className="px-2 py-3 text-gray-600">{p.categoryName || "-"}</td>
+                   <td className="px-4 py-3">
                     <span className="font-bold text-green-600">{formatPrice(p.price)}</span>
                     {num(p.mrpPrice) > num(p.price) && <p className="text-xs text-gray-400 line-through">{formatPrice(p.mrpPrice)}</p>}
                     {num(p.discount) > 0 && <p className="text-xs text-red-500 font-bold mt-0.5">Rs. {p.discount} OFF</p>}

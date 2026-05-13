@@ -13,7 +13,7 @@ import {
   FaDatabase,
   FaChartLine,
   FaImage,
- // ✅ Price Management icon
+  FaBolt, // ✅ NEW: Flash Deals icon
 } from "react-icons/fa";
 
 export default function Sidebar({ activeTab, onTabChange, isAdmin }) {
@@ -21,11 +21,12 @@ export default function Sidebar({ activeTab, onTabChange, isAdmin }) {
     { id: "dashboard", label: "Dashboard", icon: <FaHome /> },
     { id: "product", label: "Add Product", icon: <FaBoxOpen /> },
     { id: "productList", label: "Product List", icon: <FaList /> },
-    { id: "priceManagement", label: "Price Management", icon: <FaMoneyBillWave /> }, // ✅ NEW
+    { id: "priceManagement", label: "Price Management", icon: <FaMoneyBillWave /> },
+    { id: "flashDeals", label: "Flash Deals", icon: <FaBolt /> }, // ✅ NEW
     { id: "category", label: "Categories", icon: <FaTags /> },
     { id: "shop", label: "Shops", icon: <FaStore /> },
     { id: "orders", label: "Orders", icon: <FaClipboardList /> },
-    { id: "newOrders", label: "New Orders", icon: <FaBell />, badge: true }, // ✅ Added badge support
+    { id: "newOrders", label: "New Orders", icon: <FaBell />, badge: true },
     { id: "payments", label: "Payments", icon: <FaMoneyBillWave /> },
     { id: "customers", label: "Customers", icon: <FaUsers /> },
     { id: "orderReport", label: "Order Report", icon: <FaChartLine /> },
@@ -58,10 +59,15 @@ export default function Sidebar({ activeTab, onTabChange, isAdmin }) {
           >
             <span className="text-lg">{item.icon}</span>
             <span className="font-medium flex-1 text-left">{item.label}</span>
-            {/* Price Management special indicator */}
             {item.id === "priceManagement" && activeTab !== item.id && (
               <span className="px-1.5 py-0.5 bg-green-500 text-white text-xs rounded-full">
                 💰
+              </span>
+            )}
+            {/* ✅ NEW: Flash Deals badge */}
+            {item.id === "flashDeals" && activeTab !== item.id && (
+              <span className="px-1.5 py-0.5 bg-orange-500 text-white text-xs rounded-full">
+                ⚡
               </span>
             )}
           </button>
